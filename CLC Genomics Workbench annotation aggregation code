@@ -1,0 +1,437 @@
+#Prior to downstream aggregating, filtered sequences were processed using CLC Genomics Workbench version 22 (QIAGEN, Aarhus, Denmark). Specifically, the tools Quantify miRNA and subsequently Extract IsomiR Counts were applied in sequence, and the resulting annotation data were exported in CSV format and stored in the designated directory for further analysis.
+import pandas as pd
+import numpy as np
+import glob
+import os
+import re
+
+
+# Define folder paths
+folder_path = r"your folder path"
+# base_name, Please change
+base_name = "base_name"
+
+#Folder name to save to (create a new folder within the source folder)
+new_folder_name = "Aggregated_Annotation"
+
+new_folder_path = os.path.join(folder_path, new_folder_name)
+# Create the new folder if it doesn't exist
+os.makedirs(new_folder_path, exist_ok=True)
+
+# miss0
+files = glob.glob(folder_path + "*miss0.csv")
+miss0_dfs = []
+for file in files:
+    # Extract filename without extension
+    filename = os.path.splitext(os.path.basename(file))[0]
+    
+    # Read CSV file and perform necessary transformations
+    df_01 = pd.read_csv(file, usecols=['Sequence','Name'], index_col=None, encoding="shift-jis")
+    df_02 = df_01['Name'].str.split('<#>',expand=True).replace("len", "", regex=True)
+    
+    df_031= df_02[6].str.split('.',expand=True)
+    def remove_prefix(x):
+        if isinstance(x, str):
+            return x.split(':')[1] if ':' in x else x
+        else:
+            return 0
+    df_031 = df_031.applymap(remove_prefix).replace("]", "", regex=True)
+    df_032= df_02[7].str.split('.',expand=True)
+    
+    df_0321 = df_032[df_032[1].str.endswith('s', na=True) | df_032[1].isna()]
+    df_0322 = df_032[~(df_032[1].str.endswith('s', na=False) | df_032[1].isna())]
+
+    df_0323 = pd.DataFrame()
+    df_0323['f'] = pd.concat([df_0321[1], df_0322[0]]).replace("s", "", regex=True).fillna('')
+    df_0323['b'] = pd.concat([df_0321[2], df_0322[1]]).fillna('')
+    
+    
+    df_033 = pd.DataFrame()
+    df_033['f_len']= df_0323['f'].str.len().fillna(0)
+    df_033['miss']= df_032[0].str.len().fillna(0)
+    df_033['b_len']= df_0323['b'].str.len().fillna(0)
+    
+    df_04= pd.DataFrame(pd.concat([df_01['Sequence'], df_02.rename(columns={0: 'RNA', 1: 'len', 2: 'X', 3: 'detail', 4: 'URS', 5: 'chr'}).drop([6,7],axis=1), df_031, df_033], axis=1))
+    df_04['match'] = 'miss0'
+    # Create a dataframe for each file name
+    globals()["df_" + filename.split(".")[0]] = df_04
+    
+    
+# miss1
+files = glob.glob(folder_path + "*_miss1.csv")
+miss1_dfs = []
+for file in files:
+    filename = os.path.splitext(os.path.basename(file))[0]
+    df_11 = pd.read_csv(file, usecols=['Sequence','Name'], index_col=None, encoding="shift-jis")
+    df_12= df_11['Name'].str.split('<#>',expand=True).replace("len", "", regex=True)
+    
+    df_131= df_12[6].str.split('.',expand=True)
+    def remove_prefix(x):
+        if isinstance(x, str):
+            return x.split(':')[1] if ':' in x else x
+        else:
+            return 0
+    df_131 = df_131.applymap(remove_prefix).replace("]", "", regex=True)
+    df_132= df_12[7].str.split('.',expand=True)
+    # Separate into two data frames
+    df_1321 = df_132[df_132[1].apply(lambda x: x[0].isupper())]
+    df_1322 = df_132[df_132[1].apply(lambda x: x[0].islower())]
+
+    df_1323 = pd.DataFrame()
+    df_1323['f'] = pd.concat([df_1321[0], df_1322[1]]).replace("s", "", regex=True).fillna('')
+    df_1323['miss'] = pd.concat([df_1321[1], df_1322[2]])
+    df_1323['b'] = pd.concat([df_1321[2], df_1322[3]]).fillna('')
+    
+    df_133 = pd.DataFrame()
+    df_133['f_len'] = df_1323['f'].str.len().fillna(0)
+    df_133['miss'] = df_1323['miss']
+    df_133['b_len'] = df_1323['b'].str.len().fillna(0)
+    
+    df_14= pd.DataFrame(pd.concat([df_11['Sequence'], df_12.rename(columns={0: 'RNA', 1: 'len', 2: 'X', 3: 'detail', 4: 'URS', 5: 'chr'}).drop([6,7],axis=1), df_131, df_133], axis=1))
+    df_14['match'] = 'miss1'
+    # Create a dataframe for each file name
+    globals()["df_" + filename.split(".")[0]] = df_14
+    
+
+# miss2
+files = glob.glob(folder_path + "*_miss2.csv")
+miss0_dfs = []
+for file in files:
+    filename = os.path.splitext(os.path.basename(file))[0]
+    df_21 = pd.read_csv(file, usecols=['Sequence','Name'], index_col=None, encoding="shift-jis")
+    df_22=df_21['Name'].str.split('<#>',expand=True).replace("len", "", regex=True)
+    
+    df_231= df_22[6].str.split('.',expand=True)
+    def remove_prefix(x):
+        if isinstance(x, str):
+            return x.split(':')[1] if ':' in x else x
+        else:
+            return 0
+    df_231 = df_231.applymap(remove_prefix).replace("]", "", regex=True)
+    df_232 = df_22[7].str.split('.',expand=True)
+    
+     # Separate into two data frames
+    df_2321 = df_232[df_232[1].apply(lambda x: x[0].isupper())]
+    
+    df_23211 = df_2321[df_2321[2].apply(lambda x: x[0].isupper() if x is not None else False)]
+    df_23212 = df_2321[~df_2321[2].apply(lambda x: x[0].isupper() if x is not None else False)]
+    
+    df_2322 = df_232[df_232[1].apply(lambda x: x[0].islower())]
+    
+    df_233 = pd.DataFrame()
+    df_233['f'] = pd.concat([df_23211[0], df_23212[0], df_2322[1]]).replace("s", "", regex=True).fillna('')
+    df_233['miss'] = pd.concat([df_23211[1].fillna('')+df_23211[2].fillna(''), df_23212[1], df_2322[2].fillna('')+df_2322[3].fillna('')])
+    df_233['b'] = pd.concat([df_23211[3], df_23212[2], df_2322[4]]).fillna('')
+    
+    df_234 = pd.DataFrame()
+    df_234['f_len'] = df_233['f'].str.len().fillna(0)
+    df_234['miss'] = df_233['miss']
+    df_234['b_len'] = df_233['b'].str.len().fillna(0)
+    
+    df_24= pd.DataFrame(pd.concat([df_21['Sequence'], df_22.rename(columns={0: 'RNA', 1: 'len', 2: 'X', 3: 'detail', 4: 'URS', 5: 'chr'}).drop([6,7],axis=1), df_231, df_234], axis=1))
+    df_24['match'] = 'miss2'
+    # Create a dataframe for each file name
+    globals()["df_" + filename.split(".")[0]] = df_24
+    
+
+df_cfa =  pd.concat([df_cfa_miss0, df_cfa_miss1, df_cfa_miss2]).replace("", 0).fillna(0)
+df_hsa =  pd.concat([df_hsa_miss0, df_hsa_miss1, df_hsa_miss2]).replace("", 0).fillna(0)
+df_mmu =  pd.concat([df_mmu_miss0, df_mmu_miss1, df_mmu_miss2]).replace("", 0).fillna(0)
+df_bta =  pd.concat([df_bta_miss0, df_bta_miss1, df_bta_miss2]).replace("", 0).fillna(0)
+
+#Change the name of the header
+cfa_new_columns = [ 'Sequence', 'RNA', 'len', 'X', 'detail', 'URS', 'chr','chr1', 'chr2', 'chr3', 'chr4', 'chr5', 'chr6', 'chr7', 'chr8', 'chr9',  'chr10', 'chr11', 'chr12', 'chr13', 'chr14', 'chr15', 'chr16', 'chr17', 'chr18', 'chr19', 'chr20', 'chr21', 'chr22', 'chr23', 'chr24', 'chr25', 'chr26', 'chr27', 'chr28', 'chr29', 'chr30', 'chr31', 'chr32', 'chr33', 'chr34', 'chr35', 'chr36', 'chr37', 'chr38', 'chrX', 'chrY', 'chrM', 'Others', 'Total', 'f_len', 'miss', 'b_len', 'Match_Type' ]
+df_cfa.columns = cfa_new_columns
+
+hsa_new_columns = [ 'Sequence', 'RNA', 'len', 'X', 'detail', 'URS', 'chr','chr1', 'chr2', 'chr3', 'chr4', 'chr5', 'chr6', 'chr7', 'chr8', 'chr9',  'chr10', 'chr11', 'chr12', 'chr13', 'chr14', 'chr15', 'chr16', 'chr17', 'chr18', 'chr19', 'chr20', 'chr21', 'chr22','chrX', 'chrY', 'chrM', 'Others', 'Total', 'f_len', 'miss', 'b_len', 'Match_Type']
+df_hsa.columns = hsa_new_columns
+
+mmu_new_columns = [ 'Sequence', 'RNA', 'len', 'X', 'detail', 'URS', 'chr','chr1', 'chr2', 'chr3', 'chr4', 'chr5', 'chr6', 'chr7', 'chr8', 'chr9',  'chr10', 'chr11', 'chr12', 'chr13', 'chr14', 'chr15', 'chr16', 'chr17', 'chr18', 'chr19', 'chrX', 'chrY', 'chrM', 'Others', 'Total', 'f_len', 'miss', 'b_len', 'Match_Type']
+df_mmu.columns = mmu_new_columns
+
+bta_new_columns = [ 'Sequence', 'RNA', 'len', 'X', 'detail', 'URS', 'chr','chr1', 'chr2', 'chr3', 'chr4', 'chr5', 'chr6', 'chr7', 'chr8', 'chr9',  'chr10', 'chr11', 'chr12', 'chr13', 'chr14', 'chr15', 'chr16', 'chr17', 'chr18', 'chr19', 'chr20', 'chr21', 'chr22', 'chr23', 'chr24', 'chr25', 'chr26', 'chr27', 'chr28', 'chr29', 'chrX', 'chrY', 'chrM', 'Others', 'Total', 'f_len', 'miss', 'b_len', 'Match_Type' ]
+df_bta.columns = bta_new_columns
+
+df_cfa['len_Frag'] = df_cfa['Sequence'].str.len()
+df_hsa['len_Frag'] = df_hsa['Sequence'].str.len() 
+df_mmu['len_Frag'] = df_mmu['Sequence'].str.len()
+df_bta['len_Frag'] = df_bta['Sequence'].str.len()
+
+#Create a file based on URS format.
+df_cfa_URS =  df_cfa.sort_values(['URS','RNA','f_len','len_Frag','Match_Type']).reset_index(drop=True)
+df_hsa_URS =  df_hsa.sort_values(['URS','RNA','f_len','len_Frag','Match_Type']).reset_index(drop=True)
+df_mmu_URS =  df_mmu.sort_values(['URS','RNA','f_len','len_Frag','Match_Type']).reset_index(drop=True)
+df_bta_URS =  df_bta.sort_values(['URS','RNA','f_len','len_Frag','Match_Type']).reset_index(drop=True)
+
+
+#Sorting data
+def sort_dataframe(df):
+    return df.sort_values(['Sequence', 'RNA', 'URS']).reset_index(drop=True)
+
+# Applying the function to each DataFrame
+df_cfa = sort_dataframe(df_cfa)
+df_hsa = sort_dataframe(df_hsa)
+df_mmu = sort_dataframe(df_mmu)
+df_bta = sort_dataframe(df_bta)
+
+#Match_Type(A DataFrame where duplicate entries in the 'Sequence' column have been removed, and the index is based on the 'Sequence' values)
+def process_dataframe(df):
+    # Drop duplicates based on 'Sequence'
+    df = df.drop_duplicates(subset=['Sequence'])
+    # Set 'Sequence' as the index
+    df = df.set_index('Sequence')
+    return df
+# Applying the function to each DataFrame
+df_cfa_no_duplication = process_dataframe(df_cfa)
+df_hsa_no_duplication = process_dataframe(df_hsa)
+df_mmu_no_duplication = process_dataframe(df_mmu)
+df_bta_no_duplication = process_dataframe(df_bta)
+
+#pre_info_df
+# Define a function to create the pre_Infomation DataFrame
+def create_pre_information(df):
+    # Ensure all numeric columns are in the correct data type
+    numeric_cols = ['f_len', 'len_Frag', 'b_len']
+    for col in numeric_cols:
+        df[col] = df[col].astype(int)
+    # Function to concatenate information for a single row
+    def concatenate_info(row):
+        return (f"{row['RNA']}[{row['len']},{row['X']}][{row['detail']}]"
+                f"{row['chr']}[{row['f_len']}:{row['len_Frag']}({row['miss']}):"
+                f"{row['b_len']}] {row['URS']}")
+    # Apply the function across each row to create the 'pre_INF' column
+    pre_info_df = pd.DataFrame()
+    pre_info_df['Sequence'] = df['Sequence']
+    pre_info_df['pre_INF'] = df.apply(concatenate_info, axis=1)
+    return pre_info_df
+# Assume df_cfa, df_hsa, df_mmu, df_bta are previously defined DataFrames
+df_cfa_pre_Infomation = create_pre_information(df_cfa)
+df_hsa_pre_Infomation = create_pre_information(df_hsa)
+df_mmu_pre_Infomation = create_pre_information(df_mmu)
+df_bta_pre_Infomation = create_pre_information(df_bta)
+
+
+#df_Infomation
+def create_information_df(pre_info_df):
+    # Copy 'Sequence' to ensure it's not altered in the original DataFrame
+    info_df = pd.DataFrame(pre_info_df['Sequence'].copy())
+    # Create 'Information' by grouping 'pre_INF' by 'Sequence' and joining with '<XX>'
+    info_df['Information'] = pre_info_df.groupby('Sequence')['pre_INF'].transform(lambda x: '<XX>'.join(x.dropna()))
+    # Set 'Sequence' as the index
+    info_df = info_df.set_index('Sequence')
+    # Ensure uniqueness in the DataFrame by dropping duplicates
+    info_df = info_df[~info_df.index.duplicated(keep='first')]
+    return info_df
+# Apply the function to each pre_Infomation DataFrame
+df_cfa_Infomation = create_information_df(df_cfa_pre_Infomation)
+df_hsa_Infomation = create_information_df(df_hsa_pre_Infomation)
+df_mmu_Infomation = create_information_df(df_mmu_pre_Infomation)
+df_bta_Infomation = create_information_df(df_bta_pre_Infomation)
+
+
+#Add a column named "Total_count"
+def calculate_total_count(df, sequence_col='Sequence'):
+    total_count_df = df.groupby(sequence_col).size().reset_index(name='Total_count')
+    total_count_df = total_count_df.set_index(sequence_col)
+    return total_count_df
+# Apply the function to each DataFrame
+df_cfa_Total_count = calculate_total_count(df_cfa)
+df_hsa_Total_count = calculate_total_count(df_hsa)
+df_mmu_Total_count = calculate_total_count(df_mmu)
+df_bta_Total_count = calculate_total_count(df_bta)
+
+
+#URS_count,Count the unique URLs
+def calculate_urs_count(df, sequence_col='Sequence', urs_col='URS'):
+    urs_count_df = df.groupby(sequence_col)[urs_col].nunique().reset_index(name='URS_count')
+    urs_count_df = urs_count_df.set_index(sequence_col)
+    return urs_count_df
+# Apply the function to each DataFrame
+df_cfa_URS_count = calculate_urs_count(df_cfa)
+df_hsa_URS_count = calculate_urs_count(df_hsa)
+df_mmu_URS_count = calculate_urs_count(df_mmu)
+df_bta_URS_count = calculate_urs_count(df_bta)
+
+
+#Rpeat_URS_Countの列
+def calculate_repeat_urs_count(total_count_df, urs_count_df):
+    # Calculate Repeat URS Count
+    repeat_urs_count_df = (total_count_df['Total_count'] - urs_count_df['URS_count']).reset_index()
+    repeat_urs_count_df.columns = ['Sequence', 'Repeat_URS_Count']
+    repeat_urs_count_df = repeat_urs_count_df.fillna(0)
+    repeat_urs_count_df = repeat_urs_count_df.set_index('Sequence')
+    return repeat_urs_count_df
+# Applying the function to calculate Repeat URS Count for each DataFrame
+df_cfa_Repeat_URS_Count = calculate_repeat_urs_count(df_cfa_Total_count, df_cfa_URS_count)
+df_hsa_Repeat_URS_Count = calculate_repeat_urs_count(df_hsa_Total_count, df_hsa_URS_count)
+df_mmu_Repeat_URS_Count = calculate_repeat_urs_count(df_mmu_Total_count, df_mmu_URS_count)
+df_bta_Repeat_URS_Count = calculate_repeat_urs_count(df_bta_Total_count, df_bta_URS_count)
+
+
+#RNA_Type
+def create_rna_type_column(df, sequence_col='Sequence', rna_col='RNA'):
+    rna_type_df = df.groupby(sequence_col)[rna_col].apply(lambda x: ','.join(x.unique())).reset_index(name='RNA_Type')
+    rna_type_df = rna_type_df.set_index(sequence_col)
+    return rna_type_df
+# Apply the function to each DataFrame
+df_cfa_RNA_Type = create_rna_type_column(df_cfa)
+df_hsa_RNA_Type = create_rna_type_column(df_hsa)
+df_mmu_RNA_Type = create_rna_type_column(df_mmu)
+df_bta_RNA_Type = create_rna_type_column(df_bta)
+
+
+#URS_info
+def create_urs_info_column(df, sequence_col='Sequence', urs_col='URS'):
+    # Group by 'Sequence', concatenate 'URS' values, and reset index
+    urs_info_df = df.groupby(sequence_col)[urs_col].apply(lambda x: ','.join(x.astype(str))).reset_index(name='URS_info')
+    # Set 'Sequence' as the index
+    urs_info_df = urs_info_df.set_index(sequence_col)
+    return urs_info_df
+# Apply the function to each DataFrame
+df_cfa_URS_info = create_urs_info_column(df_cfa)
+df_hsa_URS_info = create_urs_info_column(df_hsa)
+df_mmu_URS_info = create_urs_info_column(df_mmu)
+df_bta_URS_info = create_urs_info_column(df_bta)
+
+
+#chr_adding, for a unique URS
+def sum_relevant_columns_for_unique_urs(df):
+    # Identify relevant columns, excluding 'chr' but including 'chr1' to 'chrX', 'Others', 'Total'
+    relevant_columns = [col for col in df.columns if (col.startswith('chr') and col != 'chr') or col in ['Others', 'Total']]
+    # Ensure all relevant columns are numeric. Convert if necessary.
+    for col in relevant_columns:
+        df[col] = pd.to_numeric(df[col], errors='coerce')
+    # Drop duplicates based on 'Sequence' and 'URS' to consider each URS only once per Sequence
+    df_unique_urs = df.drop_duplicates(subset=['Sequence', 'URS'])
+    # Group by 'Sequence' and sum the relevant columns
+    summed_columns = df_unique_urs.groupby('Sequence')[relevant_columns].sum()
+    return summed_columns
+# Applying the function to each DataFrame
+df_cfa_chr_added = sum_relevant_columns_for_unique_urs(df_cfa)
+df_hsa_chr_added = sum_relevant_columns_for_unique_urs(df_hsa)
+df_mmu_chr_added = sum_relevant_columns_for_unique_urs(df_mmu)
+df_bta_chr_added = sum_relevant_columns_for_unique_urs(df_bta)
+
+
+#Total_chr_code
+def create_total_chr_code(df):
+    # List of columns from 'chr1' to 'Total'
+    chr_columns = [col for col in df.columns if col.startswith('chr') or col in ['Others', 'Total']]
+    # Concatenate the values of the specified columns separated by commas
+    df['Total_chr_code'] = df[chr_columns].apply(lambda row: ','.join(row.astype(str)), axis=1)
+    # Create a new DataFrame with just the 'Total_chr_code' column
+    total_chr_code_df = df[['Total_chr_code']]
+    return total_chr_code_df
+# Applying the function to each chr_added DataFrame
+df_cfa_Total_chr_code = create_total_chr_code(df_cfa_chr_added)
+df_hsa_Total_chr_code = create_total_chr_code(df_hsa_chr_added)
+df_mmu_Total_chr_code = create_total_chr_code(df_mmu_chr_added)
+df_bta_Total_chr_code = create_total_chr_code(df_bta_chr_added)
+
+
+#CHR_Type
+def create_chr_type_column(df):
+    # Define the columns to check
+    chr_columns = [col for col in df.columns if col.startswith('chr') or col in ['Others']]
+    # Function to create the CHR_Type value for a row
+    def get_chr_type(row):
+        return '/' + '/'.join([col for col in chr_columns if row[col] > 0]) + '/'
+    # Apply the function to each row
+    df['CHR_Type'] = df.apply(get_chr_type, axis=1)
+    # Create a new DataFrame with just the 'CHR_Type' column
+    chr_type_df = df[['CHR_Type']]
+    return chr_type_df
+# Applying the function to each chr_added DataFrame
+df_cfa_CHR_Type = create_chr_type_column(df_cfa_chr_added)
+df_hsa_CHR_Type = create_chr_type_column(df_hsa_chr_added)
+df_mmu_CHR_Type = create_chr_type_column(df_mmu_chr_added)
+df_bta_CHR_Type = create_chr_type_column(df_bta_chr_added)
+
+
+# For each of CFA, HSA, Mmu, and BTA, combine the data horizontally for miss rates of 0.1 and 0.2
+df_cfa_mapped = pd.DataFrame()
+df_hsa_mapped = pd.DataFrame()
+df_mmu_mapped = pd.DataFrame()
+df_bta_mapped = pd.DataFrame()
+df_cfa_mapped = pd.concat([df_cfa_no_duplication[['len_Frag','Match_Type']],df_cfa_Total_count, df_cfa_URS_count, df_cfa_Repeat_URS_Count, df_cfa_RNA_Type, df_cfa_CHR_Type, df_cfa_Total_chr_code, df_cfa_Infomation, df_cfa_URS_info, df_cfa_chr_added.iloc[:, :43]], axis=1)
+df_hsa_mapped = pd.concat([df_hsa_no_duplication[['len_Frag','Match_Type']],df_hsa_Total_count, df_hsa_URS_count, df_hsa_Repeat_URS_Count, df_hsa_RNA_Type, df_hsa_CHR_Type, df_hsa_Total_chr_code, df_hsa_Infomation, df_hsa_URS_info, df_hsa_chr_added.iloc[:, :27]], axis=1)
+df_mmu_mapped = pd.concat([df_mmu_no_duplication[['len_Frag','Match_Type']],df_mmu_Total_count, df_mmu_URS_count, df_mmu_Repeat_URS_Count, df_mmu_RNA_Type, df_mmu_CHR_Type, df_mmu_Total_chr_code, df_mmu_Infomation, df_mmu_URS_info, df_mmu_chr_added.iloc[:, :24]], axis=1)
+df_bta_mapped = pd.concat([df_bta_no_duplication[['len_Frag','Match_Type']],df_bta_Total_count, df_bta_URS_count, df_bta_Repeat_URS_Count, df_bta_RNA_Type, df_bta_CHR_Type, df_bta_Total_chr_code, df_bta_Infomation, df_bta_URS_info, df_bta_chr_added.iloc[:, :34]], axis=1)
+df_cfa_mapped = df_cfa_mapped.reset_index()
+df_hsa_mapped = df_hsa_mapped.reset_index()
+df_mmu_mapped = df_mmu_mapped.reset_index()
+df_bta_mapped = df_bta_mapped.reset_index()
+
+
+#Processing of unmapped reads
+# Reference file paths
+reference_files = {
+    "cfa": r"E:\G-NAS-01\student\Nobu\NEWcfahsammu/cfa-RNA+tRf_CCA with chromosome and region(only total 1).csv",
+    "hsa": r"E:\G-NAS-01\student\Nobu\NEWcfahsammu/hsa-RNA+tRf_CCA with chromosome and region(only total 1).csv",
+    "mmu": r"E:\G-NAS-01\student\Nobu\NEWcfahsammu/mmu-RNA+tRf_CCA with chromosome and region(only total 1).csv",
+    "bta": r"E:\G-NAS-01\student\Nobu\NEWcfahsammu/bta-RNA+tRf_CCA with chromosome and region(only total 1).csv",
+}
+def process_species(species, unmapped_file_path, reference_file_path):
+    # Load reference sequences
+    reference_df = pd.read_csv(reference_file_path, names=['RNA', 'Seq'], usecols=[0, 2], encoding="shift-jis")
+    # Load unmapped sequences
+    unmapped_df = pd.read_csv(unmapped_file_path, header=None, names=['Sequence'], usecols=[2])
+    # Calculate 'len_Frag' for each sequence
+    unmapped_df['len_Frag'] = unmapped_df['Sequence'].str.len()
+    # Initially set all sequences as 'Unmapped'
+    unmapped_df['Match_Type'] = 'Unmapped'
+    # Find if each sequence matches any sequence in the reference
+    for seq in unmapped_df['Sequence'].unique():
+        if reference_df['Seq'].str.contains(seq, regex=False).any():
+            count = reference_df['Seq'].str.contains(seq, regex=False).sum()
+            unmapped_df.loc[unmapped_df['Sequence'] == seq, 'Match_Type'] = f'Mapped ({count})'
+    return unmapped_df
+# Process unmapped reads for each species and store the results
+cfa_Unmapped_read_counts = process_species('cfa', f"{folder_path}cfa_unmapped.csv", reference_files['cfa'])
+hsa_Unmapped_read_counts = process_species('hsa', f"{folder_path}hsa_unmapped.csv", reference_files['hsa'])
+mmu_Unmapped_read_counts = process_species('mmu', f"{folder_path}mmu_unmapped.csv", reference_files['mmu'])
+bta_Unmapped_read_counts = process_species('bta', f"{folder_path}bta_unmapped.csv", reference_files['bta'])
+
+
+# Concatenate the data vertically for mapped and unmapped sequences of each species (cfa, hsa, mmu, bta)
+df_cfa_mapped_and_unmapped = pd.DataFrame()
+df_hsa_mapped_and_unmapped = pd.DataFrame()
+df_mmu_mapped_and_unmapped = pd.DataFrame()
+df_bta_mapped_and_unmapped = pd.DataFrame()
+df_cfa_mapped_and_unmapped = pd.concat([df_cfa_mapped, cfa_Unmapped_read_counts], ignore_index=True).fillna(0).set_index('Sequence')
+df_hsa_mapped_and_unmapped = pd.concat([df_hsa_mapped, hsa_Unmapped_read_counts], ignore_index=True).fillna(0).set_index('Sequence')
+df_mmu_mapped_and_unmapped = pd.concat([df_mmu_mapped, mmu_Unmapped_read_counts], ignore_index=True).fillna(0).set_index('Sequence')
+df_bta_mapped_and_unmapped = pd.concat([df_bta_mapped, bta_Unmapped_read_counts], ignore_index=True).fillna(0).set_index('Sequence')
+df_cfa_mapped_and_unmapped = df_cfa_mapped_and_unmapped.sort_index()
+df_hsa_mapped_and_unmapped = df_hsa_mapped_and_unmapped.sort_index()
+df_mmu_mapped_and_unmapped = df_mmu_mapped_and_unmapped.sort_index()
+df_bta_mapped_and_unmapped = df_bta_mapped_and_unmapped.sort_index()
+
+
+#Finally, concatenate horizontally
+df_completely_annotated = pd.DataFrame()
+df_completely_annotated = pd.concat([df_cfa_mapped_and_unmapped, df_hsa_mapped_and_unmapped, df_mmu_mapped_and_unmapped, df_bta_mapped_and_unmapped],axis=1)
+
+
+print(df_cfa.shape[0])
+print(df_hsa.shape[0])
+print(df_mmu.shape[0])
+print(df_bta.shape[0])
+print("==========df_completely_annotated===========")
+print(df_completely_annotated)
+
+#file names
+
+df_cfa_URS_filename= f'cfa-iso_miR_URSbase_{base_name}.csv'
+df_hsa_URS_filename= f'hsa-iso_miR_URSbase_{base_name}.csv'
+df_mmu_URS_filename= f'mmu-iso_miR_URSbase_{base_name}.csv'
+df_bta_URS_filename= f'bta-iso_miR_URSbase_{base_name}.csv'
+df_completely_annotated_filename = f'cfa,hsa,mmu,bta-anotated_{base_name}.csv'
+
+#Output: Data from the URS database
+df_cfa_URS.to_csv(os.path.join(new_folder_path, df_cfa_URS_filename))
+df_hsa_URS.to_csv(os.path.join(new_folder_path, df_hsa_URS_filename))
+df_mmu_URS.to_csv(os.path.join(new_folder_path, df_mmu_URS_filename))
+df_bta_URS.to_csv(os.path.join(new_folder_path, df_bta_URS_filename))
+#output 'cfa,hsa,mmu,bta-anotated.csv'
+df_completely_annotated.to_csv(os.path.join(new_folder_path, df_completely_annotated_filename))
