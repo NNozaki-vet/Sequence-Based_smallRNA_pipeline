@@ -7,9 +7,11 @@ The pipeline is for small RNA-seq (miRNA-seq). It retains exact read sequences, 
 What’s inside
 
 1.Sequence filtering code
+
 Filters and deduplicates reads while preserving exact sequences and counts.
 
 2.CLC Genomics Workbench annotation aggregation
+
 Utilities that import and aggregate CLC export tables into analysis-ready annotation matrices.
 
 More modules will be added if needed for manuscript reproduction (quantification, minimal stats, and figure helpers).
