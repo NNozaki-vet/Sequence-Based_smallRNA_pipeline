@@ -4,7 +4,7 @@ This repository hosts the original code used in the manuscript
 
 The pipeline is for small RNA-seq (miRNA-seq). It retains exact read sequences, reduces reference-annotation bias, and captures small RNAs (e.g., tRNA, rRNA, YRNA, snoRNA, snRNA, and lncRNA fragments) in addition to canonical microRNA.
 
-What’s inside
+What’s inside in "Original_code"
 
 1. Sequence filtering code
 
