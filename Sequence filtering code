@@ -1,0 +1,802 @@
+#Apply a sample-count filter that retains sequences detected in ≥ two samples with CPM > cutoff.
+#After sorting the filtered sequences, export them to FASTA. Aggregate per-sequence counts and CPM values, and additionally compute CPM summaries restricted to sequences that satisfy the ≥ two-sample (CPM > cutoff) criterion. Perform quantile normalization, and then export the resulting sequences to FASTA.
+import os
+import shutil
+import pandas as pd
+import numpy as np
+import glob
+from reportlab.lib.pagesizes import letter
+
+# Please specify the folder that contains the trimmed sample FASTA files.
+# If needed, merge and reformat inputs to ensure a one-file-per-sample layout before this process.
+folder_path = r"your folder path"
+
+pre_files = glob.glob(folder_path + "*.csv")
+
+#Please name for core name.
+base_name = "your core name"
+
+#Condition
+Cutoff_CPM = 1.0000000
+Minimam_sample_Number = 2.0000 # You can change for your filtering process.
+
+#Please name for your saving folder.
+new_folder_name = "Results_of_Read-selection(Python_Code)"
+
+new_folder_path = os.path.join(folder_path, new_folder_name)
+
+# Create the new folder if it doesn't exist
+os.makedirs(new_folder_path, exist_ok=True)
+
+
+# Place any sample whose trimmed read count is less than 1,000,000 / Cutoff_CPM into the Samples_TooSmall_TrimmedReads folder.
+min_row_count = 1000000 / Cutoff_CPM
+
+# Create a new directory for too small files
+new_folder_path_2 = os.path.join(folder_path, "Samples_TooSmall_TrimmedReads")
+os.makedirs(new_folder_path_2, exist_ok=True)
+
+# Loop through files and move those with fewer than the minimum number of rows
+for file_path in pre_files:
+    try:
+        filename = os.path.splitext(os.path.basename(file_path))[0]
+        # Read the file using pandas to count the rows
+        df = pd.read_csv(file_path, index_col=None, names=['Seq'], usecols=[2])
+        row_count = df.shape[0]
+        
+        # Check if the file has fewer rows than the minimum
+        if row_count < min_row_count:
+            # Define the new file path
+            new_file_path = os.path.join(new_folder_path_2, os.path.basename(file_path))
+            # Move the file
+            shutil.move(file_path, new_file_path)
+            print(f"Moved '{filename}' due to insufficient rows: {row_count}")
+    except Exception as e:
+        print(f"Failed to process '{filename}': {e}")
+        
+# From the remaining files, extract sequences in each file whose CPM exceeds the cutoff.
+files = glob.glob(folder_path + "*.csv")
+dfs = []
+All_Sequences_dfs =[]
+All_counts_dfs = []
+All_CPM_dfs = []
+
+# Execution
+for file in files:
+    df = pd.read_csv(file, index_col=None, names=['Seq'], usecols=[2])
+    All_Sequences = df.drop_duplicates('Seq')
+    All_Sequences_dfs.append(All_Sequences)
+    
+    counts = df['Seq'].value_counts(normalize=False)
+    CPM = counts*1000000/df.shape[0]
+    df = df[df['Seq'].isin(counts[counts > df.shape[0]* Cutoff_CPM /1000000].index)]
+    df = df.drop_duplicates('Seq')
+    dfs.append(df)
+    All_counts_dfs.append(counts)
+    All_CPM_dfs.append(CPM)
+
+df_All_Sequences = pd.concat(All_Sequences_dfs, axis=0, ignore_index=True).drop_duplicates('Seq')
+df_All_counts = pd.concat(All_counts_dfs, axis=1)
+df_All_CPM = pd.concat(All_CPM_dfs, axis=1)
+
+df_AllSamples_counts = df_All_counts.sum(axis=1)
+df_AllSamples_averageCPM = df_All_CPM.mean(axis=1)
+
+cutoff_SampleNum_array = np.arange(1, df_All_counts.shape[1] + 1)
+mask_count = df_All_counts > 0
+count_mask_count_per_row = mask_count.sum(axis=1)
+
+# Calculate the number of common sequences greater than each cutoff
+Number_of_CommonSequence = [count_mask_count_per_row[count_mask_count_per_row > (cutoff-1)].count() for cutoff in cutoff_SampleNum_array]
+Percentage_Number_of_CommonSequence = [num * 100 / df_All_Sequences.shape[0] for num in Number_of_CommonSequence]
+
+# Calculate the number of common sequences equal to each cutoff
+Number_of_CommonSequence_Equal = [count_mask_count_per_row[count_mask_count_per_row == cutoff].count() for cutoff in cutoff_SampleNum_array]
+Percentage_Number_of_CommonSequence_Equal = [num_Equ * 100 / df_All_Sequences.shape[0] for num_Equ in Number_of_CommonSequence_Equal]
+
+# Calculate the number of reads of common sequences greater than each cutoff
+Number_of_Reads_of_CommonSequence = [df_AllSamples_counts[count_mask_count_per_row > (cutoff-1)].sum() for cutoff in cutoff_SampleNum_array]
+Percentage_Number_of_Reads_of_CommonSequence = [num * 100 / df_AllSamples_counts.sum() for num in Number_of_Reads_of_CommonSequence]
+
+# Calculate the number of reads of common sequences equal to each cutoff
+Number_of_Reads_of_CommonSequence_Equal = [df_AllSamples_counts[count_mask_count_per_row == cutoff].sum() for cutoff in cutoff_SampleNum_array]
+Percentage_Number_of_Reads_of_CommonSequence_Equal = [num_Equ * 100 / df_AllSamples_counts.sum() for num_Equ in Number_of_Reads_of_CommonSequence_Equal]
+
+# Calculate the Average of CPM of common sequences greater than each cutoff
+SUM_of_averageCPM_of_CommonSequence = [df_AllSamples_averageCPM[count_mask_count_per_row > (cutoff-1)].sum()for cutoff in cutoff_SampleNum_array]
+Average_of_averageCPM_of_CommonSequence = [df_AllSamples_averageCPM[count_mask_count_per_row > (cutoff-1)].mean()for cutoff in cutoff_SampleNum_array]
+Percentage_SUM_of_CPM_of_CommonSequence = [num /10000 for num in SUM_of_averageCPM_of_CommonSequence]
+
+
+# Combine all data into a DataFrame
+Num_of_Samples_cutoff_results_df = pd.DataFrame({
+    'Cutoff': cutoff_SampleNum_array,
+    'Number of Common Sequences_above': Number_of_CommonSequence,
+    'Percentage of Common Sequences_above': Percentage_Number_of_CommonSequence,
+    'Number of Common Sequences_Equal': Number_of_CommonSequence_Equal,
+    'Percentage of Common Sequences_Equal': Percentage_Number_of_CommonSequence_Equal,
+    'Number of Reads of Common Sequences_above': Number_of_Reads_of_CommonSequence,
+    'Percentage of Reads of Common Sequences_above': Percentage_Number_of_Reads_of_CommonSequence,
+    'Number of Reads of Common Sequences_Equal': Number_of_Reads_of_CommonSequence_Equal,
+    'Percentage of Reads of Common Sequences_Equal': Percentage_Number_of_Reads_of_CommonSequence_Equal,
+    'SUM_of_averageCPM_of_Common Sequence_above': SUM_of_averageCPM_of_CommonSequence,
+    'Average_of_averageCPM_of_Common Sequence_above': Average_of_averageCPM_of_CommonSequence,
+    'Percentage_SUM_of_CPM_of_Common Sequence_above': Percentage_SUM_of_CPM_of_CommonSequence
+})
+
+
+cutoff_CPM_for_Total = [0, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09,  0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3.0, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 4.0, 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 4.8, 4.9, 5.0, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 5.8, 5.9, 6.0, 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 6.8, 6.9, 7.0, 7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 7.7, 7.8, 7.9, 8.0,  8.1, 8.2, 8.3, 8.4, 8.5, 8.6, 8.7, 8.8, 8.9, 9.0, 9.1, 9.2, 9.3, 9.4, 9.5, 9.6, 9.7, 9.8, 9.9,  10, 11, 13, 15, 17, 19, 21, 23, 25, 27, 30, 40, 50, 60, 70, 80, 90, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400, 2600, 2800, 3000, 3200, 3400, 3600, 3800, 4000, 4200, 4400, 4600, 4800, 5000, 5200, 5400, 5600, 5800, 6000, 6200, 6400, 6600, 6800, 7000, 7200, 7400, 7600, 7800, 8000, 8200, 8400, 8600, 8800, 9000, 9200, 9400, 9600, 9800, 10000]
+# Lists to store results
+Number_of_Sequence_aboveCutoff_in_atleast_1sample = []
+Percentage_Number_of_Sequence_aboveCutoff_in_atleast_1sample = []
+Number_of_Reads_of_Sequence_aboveCutoff = []
+Percentage_Number_of_Reads_of_Sequence_aboveCutoff = []
+
+for cutoff in cutoff_CPM_for_Total:
+    mask_count = (df_All_CPM > cutoff)  # Generate the correct mask
+    
+    count_mask_count_per_row = mask_count.sum(axis=1)  # Assuming this needs to be across rows of df_All_CPM
+
+    num_seq = count_mask_count_per_row[count_mask_count_per_row > 0].count()
+    Number_of_Sequence_aboveCutoff_in_atleast_1sample.append(num_seq)
+    Percentage_Number_of_Sequence_aboveCutoff_in_atleast_1sample.append(num_seq * 100 / df_All_Sequences.shape[0])
+
+    num_reads = df_AllSamples_counts[count_mask_count_per_row > 0].sum() 
+    Number_of_Reads_of_Sequence_aboveCutoff.append(num_reads)
+    Percentage_Number_of_Reads_of_Sequence_aboveCutoff.append(num_reads * 100 / df_AllSamples_counts.sum())
+    
+    SUM_of_averageCPM_of_Sequence_aboveCutoff = df_AllSamples_averageCPM[count_mask_count_per_row > 0].sum()
+    Average_of_averageCPM_of_Sequence_aboveCutoff = df_AllSamples_averageCPM[count_mask_count_per_row > 0].mean()
+    Percentage_SUM_of_CPM_of_Sequence_aboveCutoff = SUM_of_averageCPM_of_Sequence_aboveCutoff /10000
+    
+    
+# Combine all data into a DataFrame
+cutoff_CPM_for_Total_results_df = pd.DataFrame({
+    'Cutoff': cutoff_CPM_for_Total,
+    'Number of Sequences > Cutoff in at least 1 sample': Number_of_Sequence_aboveCutoff_in_atleast_1sample,
+    'Percentage of Sequences > Cutoff in at least 1 sample': Percentage_Number_of_Sequence_aboveCutoff_in_atleast_1sample,
+    'Number of Reads of Sequences > Cutoff': Number_of_Reads_of_Sequence_aboveCutoff,
+    'Percentage of Reads of Sequences > Cutoff': Percentage_Number_of_Reads_of_Sequence_aboveCutoff,
+    'SUM_of_averageCPM_of_Sequence_>Cutoff': SUM_of_averageCPM_of_Sequence_aboveCutoff,
+    'Average_of_averageCPM_of_Sequence_aboveCutoff': Average_of_averageCPM_of_Sequence_aboveCutoff,
+    'Percentage_SUM_of_CPM_of_Sequence_aboveCutoff': Percentage_SUM_of_CPM_of_Sequence_aboveCutoff
+})
+
+df_1 = pd.concat(dfs, axis=0, ignore_index=True).drop_duplicates('Seq')
+df_1.sort_values(['Seq'],inplace=True)
+df_1.reset_index(drop=True, inplace=True)
+
+
+# Count sequences and calculate CPM in files
+counts_dfs = []
+CPM_dfs = []
+
+for file in files:
+    filename = os.path.splitext(os.path.basename(file))[0]
+    df = pd.read_csv(file, usecols=[2], names=['Seq'])
+    counts = df['Seq'].value_counts().reindex(df_1['Seq'], fill_value=0).rename(filename)
+    CPM = counts * 1000000 / df.shape[0]
+    
+    counts_dfs.append(counts)
+    CPM_dfs.append(CPM)
+
+# Concatenate counts and CPM DataFrames
+df_counts = pd.concat(counts_dfs, axis=1)
+df_CPM = pd.concat(CPM_dfs, axis=1)
+
+# Create a boolean mask where True represents values greater than Cutoff
+mask_greater_than = df_CPM > Cutoff_CPM
+
+# Count the number of True values (i.e., values > Cutoff) in each row
+count_greater_than_per_row = mask_greater_than.sum(axis=1)
+
+# Identify rows where the count of values > CutoffCPM(1 or 5) is less than 2.00
+rows_to_delete = count_greater_than_per_row < Minimam_sample_Number
+Seq_exist_in_All_samples = count_greater_than_per_row == df_CPM.shape[1]
+
+# Filter the DataFrame to keep only rows that do not meet the deletion criterion
+df_CPM_filtered = df_CPM[~rows_to_delete]
+df_CPM_UN_filtered = df_CPM[rows_to_delete]
+df_CPM_exist_in_All_samples = df_CPM[Seq_exist_in_All_samples]
+
+df_CPM_averageCPM = df_CPM.mean(axis=1)
+df_CPM_filtered_averageCPM = df_CPM_filtered.mean(axis=1)
+df_CPM_exist_in_All_samples_averageCPM = df_CPM_exist_in_All_samples.mean(axis=1)
+
+df_counts_filtered = df_counts[~rows_to_delete]
+df_counts_UN_filtered = df_counts[rows_to_delete]
+df_counts_exist_in_All_samples = df_counts[Seq_exist_in_All_samples]
+
+#The following sections are for  the cutoff analysis.
+#Parameter of Sequences of CPM > cutoff_CPM in 1sample(df_CPM_filtered)
+Total_Sequence_CPM_1samples_filtered = df_CPM.shape[0] #Total number of sequences used in >cutoff_CPM / TMM across one or more samples (added to the name; used for calculations)
+Sequence_CPM_1samples_filtered_above0 = (df_CPM > 0.00000).sum(axis=0) #Total number of sequences (number of sequences with CPM greater than 0)
+Sum_of_CPMcontained_1samples_filtered = df_CPM.sum(axis=0) #Total CPM count for each sample
+Sequence_above_cutoff_1samples_filtered_above_Cutoff = (df_CPM> Cutoff_CPM).sum(axis=0)#Total number of sequences exceeding the Cutoff_CPM in each sample
+Sum_of_CPM_above_cutoff_1samples_filtered_above_Cutoff = df_CPM[df_CPM > Cutoff_CPM].sum(axis=0)#Total number of CPM values ​​exceeding the Cutoff_CPM in each sample
+average_above_cutoff_1samples_filtered = Sum_of_CPMcontained_1samples_filtered / Total_Sequence_CPM_1samples_filtered #Average CPM for each sample
+max_above_cutoff_1samples_filtered = df_CPM.max(axis=0)#Maximum CPM value for each sample
+median_CPM_1samples_filtered = df_CPM.median(axis=0) #Median CPM for each sample
+min_above_cutoff_1samples_filtered = df_CPM[df_CPM>0].min(axis=0)#Minimum CPM value for each sample (greater than 0)
+Percentage_Sequence_1samples_filtered_above_cutoff_in_Total_Sequence_1samples = Sequence_above_cutoff_1samples_filtered_above_Cutoff*100 / Total_Sequence_CPM_1samples_filtered #Percentage of total sequences exceeding the cutoff value
+Percentage_CPM_1samples_filtered_above_cutoff_in_Total_CPM_1samples = Sum_of_CPM_above_cutoff_1samples_filtered_above_Cutoff*100 / Sum_of_CPMcontained_1samples_filtered #Percentage of total sequences exceeding the cutoff value
+#Percentage of Total Sequences in 1 Sample (after filtering) - Calculated below
+Percentage_Total_CPM_1samples_filtered_in_Total = Sum_of_CPMcontained_1samples_filtered / 10000# Percentage of total sequence reads in each sample relative to the original sample.
+
+#Parameter of Sequences of CPM > cutoff_CPM in 2sample(df_CPM_filtered)
+Total_Sequence_CPM_2samples_filtered = df_CPM_filtered.shape[0]# Total number of sequences used in >cutoff_CPM / TMM analysis across 2 or more samples (to be added to the name; used for calculations)
+Sequence_CPM_2samples_filtered_above0 = (df_CPM_filtered > 0.00000).sum(axis=0)#Total number of sequences (number of sequences with CPM greater than 0)
+Sum_of_CPMcontained_2samples_filtered = df_CPM_filtered.sum(axis=0)#Total CPM count for each sample
+Sequence_above_cutoff_2samples_filtered_above_Cutoff = (df_CPM_filtered > Cutoff_CPM).sum(axis=0)#Total number of sequences exceeding the Cutoff_CPM in each sample
+Sum_of_CPM_above_cutoff_2samples_filtered_above_Cutoff = df_CPM_filtered[df_CPM_filtered > Cutoff_CPM].sum(axis=0)#Total number of CPM values ​​exceeding the Cutoff_CPM in each sample
+average_above_cutoff_2samples_filtered = Sum_of_CPMcontained_2samples_filtered / Total_Sequence_CPM_2samples_filtered#Average CPM for each sample
+max_above_cutoff_2samples_filtered = df_CPM_filtered.max(axis=0)#Maximum CPM value for each sample
+median_CPM_2samples_filtered = df_CPM_filtered.median(axis=0)#Median CPM for each sample
+min_above_cutoff_2samples_filtered = df_CPM_filtered[df_CPM_filtered>0].min(axis=0)# Minimum CPM value for each sample (greater than 0)
+Percentage_Sequence_2samples_filtered_above_cutoff_in_Total_Sequence_2samples = Sequence_above_cutoff_2samples_filtered_above_Cutoff*100 / Total_Sequence_CPM_2samples_filtered#Total number of sequences exceeding the cutoff value
+Percentage_CPM_2samples_filtered_above_cutoff_in_Total_CPM_2samples = Sum_of_CPM_above_cutoff_2samples_filtered_above_Cutoff*100 / Sum_of_CPMcontained_2samples_filtered#Total number of CPMs exceeding the cutoff value
+#Percentage of Total Sequences in 2 Samples (after filtering) - Calculated below
+Percentage_Total_CPM_2samples_filtered_in_Total = Sum_of_CPMcontained_2samples_filtered / 10000# Percentage of total sequence reads in each sample relative to the original sample.
+Percentage_Total_Sequence_above_cutoff_2samples_filtered_above_Cutoff= Sequence_above_cutoff_2samples_filtered_above_Cutoff*100 / Total_Sequence_CPM_2samples_filtered# The percentage of genes in the array that meet the >Cutoff_CPM criteria (used as a filter in >Cutoff_CPM/TMM for 2 or more samples)
+Percentage_Total_CPM_above_cutoff_2samples_filtered_above_Cutoff = Sum_of_CPM_above_cutoff_2samples_filtered_above_Cutoff*100 / Sum_of_CPMcontained_2samples_filtered# Percentage of genes with CPM values ​​above 5 CPM (using the >Cutoff_CPM/TMM filter for genes present in 2 or more samples)
+Percentage_Total_CPM_2samples_filtered_in_CPM_1samples_filtered = Sequence_CPM_2samples_filtered_above0*100 / Sequence_CPM_1samples_filtered_above0# Percentage of total sequences (number of sequences with CPM > 0) that exceed the cutoff CPM value in at least one sample.
+Percentage_of_CPMcontained_2samples_filtered = Sum_of_CPMcontained_2samples_filtered *100/ Sum_of_CPMcontained_1samples_filtered#Percentage of CPM values ​​that are greater than the Cutoff_CPM (in one or more samples)
+
+#Parameter of Sequences of CPM > cutoff_CPM in Only 1sample(df_CPM_UN_filtered)
+Total_Sequence_CPM_UN_filtered = df_CPM_UN_filtered.shape[0]# Total number of sequences in a single sample that exceed the cutoff_CPM value (to be added to the name for calculation purposes)
+Sequence_CPM_UN_filtered_above0 = (df_CPM_filtered > 0.00000).sum(axis=0)#Total number of sequences (number of sequences with CPM greater than 0)
+Sequence_CPM_UN_filtered_above_cutoff = (df_CPM_filtered > Cutoff_CPM).sum(axis=0)#Total number of sequences (number of sequences exceeding the Cutoff_CPM), the sum of which equals Total_Sequence_CPM_UN_filtered
+Sum_of_CPM_UN_filtered = df_CPM_UN_filtered.sum(axis=0)#Total CPM count for each sample
+Sum_of_CPM_UN_filtered_above_cutoff = df_CPM_UN_filtered[df_CPM_UN_filtered > Cutoff_CPM].sum(axis=0)#Total number of CPM values ​​exceeding the Cutoff_CPM in each sample
+average_CPM_UN_filtered = Sum_of_CPM_UN_filtered / Total_Sequence_CPM_UN_filtered#Average CPM for each sample
+max_CPM_UN_filtered = df_CPM_UN_filtered.max(axis=0)#Maximum CPM value for each sample
+median_CPM_UN_filtered  = df_CPM_UN_filtered.median(axis=0)#Median CPM for each sample
+min_CPM_UN_filtered = df_CPM_UN_filtered[df_CPM_UN_filtered>0].min(axis=0)# Minimum CPM value for each sample (greater than 0)
+# Calculate the percentage of sequences (out of the total number of sequences with CPM > 0) that have a CPM value > 5 in at least one sample, as shown below.
+Percentage_Total_CPM_UN_filtered_in_Total = Sum_of_CPM_UN_filtered / 10000
+# Percentage of sequences included (total number of sequences with >5 CPM) in the sample, calculated below
+Percentage_Total_CPM_UN_filtered_above_cutoff_in_Total = Sum_of_CPM_UN_filtered_above_cutoff / 10000
+
+# Create a sequence list where the value is > cutoff_CPM for one sample, and 0 for all other samples.
+# Create a boolean mask where True represents values greater than Cutoff,
+mask_greater_than0 = df_CPM_UN_filtered > 0.00000
+# Count the number of True values (i.e., values > Cutoff) in each row
+count_greater_than0 = mask_greater_than0.sum(axis=1)
+# Identify rows where the count of values > 0.00000 is only 1 sample
+Seq_only_1sample = count_greater_than0 == 1#The df_CPM_UN_filtered dataset contains sequences that have at least one value > cutoff_CPM; therefore, the sequences in Seq_only_1sample are those that only exceed the cutoff_CPM in a single sample.
+# Filter the DataFrame to keep only rows that do not meet the deletion criterion
+df_CPM_Seq_only_1sample = df_CPM_UN_filtered[Seq_only_1sample]
+df_counts_only_1sample = df_counts_UN_filtered[Seq_only_1sample]
+#Parameters for sequences containing only 1 sample (other samples have a value of 0) (df_CPM_Seq_only_1sample)
+Total_Sequence_CPM_Only1sample = df_CPM_Seq_only_1sample.shape[0]# Total number of sequences below the cutoff_CPM threshold in a single sample (to be added to the name; used for calculations)）
+Sequence_CPM_Seq_only_1sample = (df_CPM_filtered > Cutoff_CPM).sum(axis=0)#Total number of sequences (number of sequences with CPM greater than 0)
+Sum_CPM_Seq_only_1sample = df_CPM_Seq_only_1sample.sum(axis=0)#Total CPM count for each sample
+average_CPM_Seq_only_1sample = Sum_CPM_Seq_only_1sample  / Total_Sequence_CPM_Only1sample#Average CPM for each sample
+max_CPM_Seq_only_1sample = df_CPM_Seq_only_1sample.max(axis=0)#Maximum CPM value for each sample
+median_CPM_Seq_only_1sample  = df_CPM_Seq_only_1sample.median(axis=0)#Median CPM for each sample
+min_CPM_Seq_only_1sample = df_CPM_Seq_only_1sample[df_CPM_Seq_only_1sample>0].min(axis=0)# Minimum CPM value for each sample (greater than 0)
+# Percentage of sequences that appear in only 1 sample (and are 0 in all other samples) and are above the cutoff value (calculated below)
+Percentage_Total_CPM_Seq_only_1sample_in_Total = Sum_CPM_Seq_only_1sample / 10000#Percentage of samples for CPM
+Percentage_Sequence_CPM_Seq_only_1sample_in_df_CPM_UN_filtered = Sequence_CPM_Seq_only_1sample*100 / Sequence_CPM_UN_filtered_above0# Percentage of samples containing sequences (total number of sequences with >5 CPM in a single sample, and >0 in all samples)
+Percentage_CPM_CPM_Seq_only_1sample_in_df_CPM_UN_filtered = Sum_CPM_Seq_only_1sample *100 / Sum_of_CPM_UN_filtered# Percentage of samples containing >5 CPM (total CPM count per sample)
+
+
+#Parameter of Sequences of CPM > cutoff_CPM in ALL sample(df_CPM_exist_in_All_samples)
+Total_Sequence_CPM_exist_in_All_samples = df_CPM_exist_in_All_samples.shape[0]#Total number of sequences with CPM value below cutoff_CPM in a single sample (to be added to the name for calculation purposes)
+Sum_CPM_CPM_exist_in_All_samples = df_CPM_exist_in_All_samples.sum(axis=0)#Total CPM count for each sample
+average_CPM_exist_in_All_samples = Sum_CPM_CPM_exist_in_All_samples  / Total_Sequence_CPM_exist_in_All_samples#Average CPM for each sample
+max_CPM_exist_in_All_samples = df_CPM_exist_in_All_samples.max(axis=0)#Maximum CPM value for each sample
+median_CPM_exist_in_All_samples = df_CPM_exist_in_All_samples.median(axis=0)#Median CPM for each sample
+min_CPM_exist_in_All_samples = df_CPM_exist_in_All_samples.min(axis=0)# Minimum CPM value for each sample
+# Calculate the percentage (relative to "Total") for the values ​​in the array (df_CPM_exist_in_All_samples), as shown below.
+Percentage_Sequence_CPM_Seq_exist_in_All_samples_in_Total = Sum_CPM_CPM_exist_in_All_samples / 10000#Percentage of samples for CPM
+Percentage_Sequence_CPM_Seq_exist_in_All_samples_in_df_CPM_filtered = Total_Sequence_CPM_exist_in_All_samples*100/ Total_Sequence_CPM_2samples_filtered # Percentage of sequences (passing the filter of >5 CPM in 2 or more samples using TMM)* Enter a descriptive name
+Percentage_Sequence_CPM_Seq_exist_in_All_samples_in_df_CPM_filtered_above_cuttoff = Total_Sequence_CPM_exist_in_All_samples*100/ Sequence_above_cutoff_2samples_filtered_above_Cutoff# Percentage of sequences (with >5 CPM in 2 or more samples / using the >5 CPM filter for TMM)
+Percentage_CPM_CPM_exist_in_All_samples_in_df_CPM_filtered = Sum_CPM_CPM_exist_in_All_samples*100 / Sum_of_CPMcontained_2samples_filtered
+
+# Preparing FASTA data: Moving sequence data from index to column
+df_CPM_filtered.reset_index(inplace=True)
+df_CPM_exist_in_All_samples.reset_index(inplace=True)
+df_CPM_UN_filtered.reset_index(inplace=True)
+df_CPM_Seq_only_1sample.reset_index(inplace=True)
+df_CPM_exist_in_All_samples.reset_index(inplace=True)
+
+# Preparing the DataFrame for FASTA format export
+df_fasta_filtered = pd.DataFrame({'fasta': '>' + df_CPM_filtered['Seq'], 'Seq': df_CPM_filtered['Seq']})
+fasta_CPM_UN_filtered = pd.DataFrame({'fasta': '>' + df_CPM_UN_filtered['Seq'], 'Seq': df_CPM_UN_filtered['Seq']})
+df_fasta_only_1sample = pd.DataFrame({'fasta': '>' + df_CPM_Seq_only_1sample['Seq'], 'Seq': df_CPM_Seq_only_1sample['Seq']})
+fasta_CPM_exist_in_All_samples = pd.DataFrame({'fasta': '>' + df_CPM_exist_in_All_samples['Seq'], 'Seq': df_CPM_exist_in_All_samples['Seq']})
+
+# Calculate the summary statistics (count, maximum, minimum, average, median) for sequences with CPM values ​​exceeding the cutoff threshold.
+Total_Total_Sequences = df_All_Sequences.shape[0]
+# Define cutoff values
+cutoffs = [0, 0.01, 0.03, 0.05, 0.07, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 21, 23, 25, 27, 30, 40, 50, 60, 70, 80, 90, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000,1100,1200,1300,1400,1500,1600,1700,1800,1900,2000,2100,2200,2300,2400,2500,2600,2700,2800,2900,3000,3100,3200,3300,3400,3500,3600,3700,3800,3900,4000,4100,4200,4300,4400,4500,4600,4700,4800,4900,5000,5100,5200,5300,5400,5500,5600,5700,5800,5900,6000,6100,6200,6300,6400,6500,6600,6700,6800,6900,7000,7100,7200,7300,7400,7500,7600,7700,7800,7900,8000,8100,8200,8300,8400,8500,8600,8700,8800,8900,9000,9100,9200,9300,9400,9500,9600,9700,9800,9900,10000,11000,12000,13000,14000,15000,16000,17000,18000,19000,20000,25000,30000,35000,40000,45000,50000,55000,60000,65000,70000,75000,80000,85000,90000,95000,100000]
+
+# Function to process each CSV file
+def process_file(files):
+    # Read the 'Seq' column from the CSV file
+    df = pd.read_csv(files, usecols=[2], names=['Seq'])
+    
+    # Calculate frequencies of unique sequences 
+    unique_seqs_counts = df['Seq'].value_counts()
+    Total_Sequences = df['Seq'].nunique()
+    
+    # Calculate CPM for each unique sequence
+    Total_Read = df.shape[0]
+    rpm = (unique_seqs_counts * 1000000) / Total_Read
+    
+    # Count the number of sequences above each cutoff
+    counts_above_cutoff = [rpm[rpm > cutoff].count() for cutoff in cutoffs]
+    
+    # Calculate maximum, minimum, average (mean), and median CPM
+    filename = os.path.splitext(os.path.basename(files))[0]
+    max_rpm = rpm.max()
+    min_rpm = rpm.min()
+    mean_rpm = rpm.mean()
+    median_rpm = rpm.median()
+    percentage_SeqNum_is_less2 = (unique_seqs_counts < 2).sum()*100/Total_Sequences
+    percentage_SeqNum_is_less3 = (unique_seqs_counts < 3).sum()*100/Total_Sequences
+    percentage_SeqNum_is_less4 = (unique_seqs_counts < 4).sum()*100/Total_Sequences
+    percentage_SeqNum_is_less5 = (unique_seqs_counts < 5).sum()*100/Total_Sequences
+    percentage_SeqNum_is_less6 = (unique_seqs_counts < 6).sum()*100/Total_Sequences
+    percentage_SeqNum_is_less11 = (unique_seqs_counts < 11).sum()*100/Total_Sequences
+    percentage_SeqNum_is_less51 = (unique_seqs_counts < 51).sum()*100/Total_Sequences
+    percentage_Sequence_in_Total = Total_Sequences*100 / Total_Total_Sequences
+    
+    return [filename, Total_Read, Total_Sequences, mean_rpm, max_rpm, median_rpm, min_rpm, percentage_SeqNum_is_less2, percentage_SeqNum_is_less3, percentage_SeqNum_is_less4, percentage_SeqNum_is_less5, percentage_SeqNum_is_less6, percentage_SeqNum_is_less11, percentage_SeqNum_is_less51, percentage_Sequence_in_Total] + counts_above_cutoff
+
+Cutoff_results = [process_file(files) for files in files]  # Pass the full file_path
+# Convert results to a DataFrame
+columns = ['File_Names', 'Total_Reads', 'Total_Seqences', 'Mean_CPM', 'Max_CPM', 'Median_CPM', 'Min_CPM','Percentage(%)_SeqNum_is_less2(=1)', 'Percentage(%)_SeqNum_is_less3', 'Percentage(%)_SeqNum_is_less4', 'Percentage(%)_SeqNum_is_less5', 'Percentage(%)_SeqNum_is_less6', 'Percentage(%)_SeqNum_is_less11', 'Percentage(%)_SeqNum_is_less51', f'Percentage(%)_Sequence_in_Total_Total({Total_Total_Sequences})'] + cutoffs
+Cutoff_results_df = pd.DataFrame(Cutoff_results, columns=columns)
+
+##Percentage of filtered sequences within each sample (%)
+total_sequences_in_each_sample = Cutoff_results_df.iloc[:, 2]#This specifies 0 as the cutoff value.
+# Percentage of samples containing sequences with >filter CPM (total number of sequences with CPM > 0) in a single sample.
+Percentage_Total_Sequences_1samples_filtered_above0_in_Total = Sequence_above_cutoff_1samples_filtered_above_Cutoff.values*100 / total_sequences_in_each_sample
+# Filter based on data from 2 samples: Percentage of sequences included in CPMfiltered (total number of sequences with CPM > 0) in the samples.
+Percentage_Total_Sequences_2samples_filtered_above0_in_Total = Sequence_CPM_1samples_filtered_above0.values*100 / total_sequences_in_each_sample
+#For a single sample, the percentage of sequences included in the filtered CPM data (total number of sequences with CPM values ​​above the cutoff_CPM) relative to the total number of sequences in the sample.
+Percentage_Sequence_UN_filtered_above0_in_Total = Sequence_CPM_UN_filtered_above0.values*100 / total_sequences_in_each_sample
+#Percentage of samples containing sequences (total number of sequences exceeding the filter CPM threshold)
+Percentage_Sequence_UN_filtered_above_cutoffin_in_Total = Sequence_CPM_UN_filtered_above_cutoff.values*100 / total_sequences_in_each_sample
+#Percentage of sequences (sequences found in only 1 sample and 0 in all other samples, >cutoff) relative to the total.
+Percentage_Sequence_CPM_Seq_only_1sample_in_Total = Sequence_CPM_Seq_only_1sample.values*100 / total_sequences_in_each_sample
+#In the array (df_CPM_exist_in_All_samples), show the percentages relative to the "Total" value.
+Percentage_Sequence_CPM_exist_in_All_samples_in_Total = Total_Sequence_CPM_exist_in_All_samples*100 / total_sequences_in_each_sample
+
+# Combine the analysis results from the CPM stage. Assign each variable as a new column in Cutoff_results_df with the specified headers.
+# Set all error values ​​to 0. (This is already done for each individual value, but just to be safe.)
+Cutoff_results_df = Cutoff_results_df.fillna(0)
+
+
+# Save the results
+# For one sample,  >Cutoff_CPM
+Cutoff_results_df[f'TotalNum_Sequences_1sample_filtered(CPM>0)(Total_TotalNum:{Total_Sequence_CPM_1samples_filtered})'] = Sequence_CPM_1samples_filtered_above0 .fillna(0).values
+Cutoff_results_df['SumTotal_CPM_1sample_filtered'] = Sum_of_CPMcontained_1samples_filtered .fillna(0).values
+Cutoff_results_df[f'TotalNum_Sequences_1sample_filtered>{Cutoff_CPM}'] = Sequence_above_cutoff_1samples_filtered_above_Cutoff .fillna(0).values
+Cutoff_results_df[f'SumTotal_CPM_1sample_filtered>{Cutoff_CPM}'] = Sum_of_CPM_above_cutoff_1samples_filtered_above_Cutoff .fillna(0).values
+Cutoff_results_df['AverageCPM_1sample_filtered'] = average_above_cutoff_1samples_filtered .fillna(0).values
+Cutoff_results_df['MaxCPM_1sample_filtered'] = max_above_cutoff_1samples_filtered .fillna(0).values
+Cutoff_results_df['MedianCPM_1sample_filtered'] = median_CPM_1samples_filtered .fillna(0).values
+Cutoff_results_df['MinCPM_1sample_filtered(CPM>0)'] = min_above_cutoff_1samples_filtered .fillna(0).values
+Cutoff_results_df[f'Percentage(%)_[TotalNum_Sequences_1sample_filtered(CPM>{Cutoff_CPM})]/[Total_TotalNum:{Total_Sequence_CPM_1samples_filtered}]'] = Percentage_Sequence_1samples_filtered_above_cutoff_in_Total_Sequence_1samples .fillna(0).values
+Cutoff_results_df[f'Percentage(%)_[SumTotal_CPM_1sample_filtered(CPM>{Cutoff_CPM}]/[SumTotal_CPMcontained_1sample_filtered]'] = Percentage_CPM_1samples_filtered_above_cutoff_in_Total_CPM_1samples .fillna(0).values
+Cutoff_results_df['Percentage(%)_[TotalNum_Sequences_1samples_filtered(CPM>0)]/[TotalNum_Sequences_Original_Sample]'] = Percentage_Total_Sequences_1samples_filtered_above0_in_Total.fillna(0).values
+Cutoff_results_df['Percentage(%)_[SumTotal_CPM_1samples_filtered]/[SumTotal_CPM_Original_Sample:1,000,000]'] = Percentage_Total_CPM_1samples_filtered_in_Total .fillna(0).values
+# For 2 or more samples: Use this filter for Cutoff_CPM/TMM
+Cutoff_results_df[f'TotalNum_Sequences_2samples_filtered(CPM>0)(Total_TotalNum:{Total_Sequence_CPM_2samples_filtered})'] = Sequence_CPM_2samples_filtered_above0 .fillna(0).values
+Cutoff_results_df['SumTotal_CPM_2samples_filtered'] = Sum_of_CPMcontained_2samples_filtered .fillna(0).values
+Cutoff_results_df[f'TotalNum_Sequences_2samples_filtered(CPM>{Cutoff_CPM})'] = Sequence_above_cutoff_2samples_filtered_above_Cutoff .fillna(0).values
+Cutoff_results_df[f'SumTotal_CPM_2samples_filtered(CPM>{Cutoff_CPM})'] = Sum_of_CPM_above_cutoff_2samples_filtered_above_Cutoff .fillna(0).values
+Cutoff_results_df['AverageCPM_2samples_filtered'] = average_above_cutoff_2samples_filtered .fillna(0).values
+Cutoff_results_df['MaxCPM_2samples_filtered'] = max_above_cutoff_2samples_filtered .fillna(0).values
+Cutoff_results_df['MedianCPM_2samples_filtered'] = median_CPM_2samples_filtered .fillna(0).values
+Cutoff_results_df['MinCPM_2samples_filtered(CPM>0)'] = min_above_cutoff_2samples_filtered .fillna(0).values
+Cutoff_results_df[f'Percentage(%)_[TotalNum_Sequence_2samples_filtered(CPM>{Cutoff_CPM})]/[Total_TotalNum:{Total_Sequence_CPM_2samples_filtered}]'] = Percentage_Sequence_2samples_filtered_above_cutoff_in_Total_Sequence_2samples .fillna(0).values
+Cutoff_results_df[f'Percentage(%)_[SumTotal_CPM_2samples_filtered>{Cutoff_CPM}]/[SumTotal_CPM_2samples_filtered:1,000,000]'] = Percentage_CPM_2samples_filtered_above_cutoff_in_Total_CPM_2samples .fillna(0).values
+Cutoff_results_df['Percentage(%)_[TotalNum_Sequences_2samples_filtered(CPM>0)]/[TotalNum_Sequences_Original_Sample]'] = Percentage_Total_Sequences_2samples_filtered_above0_in_Total.fillna(0).values
+Cutoff_results_df['Percentage(%)_[SumTotal_CPM_2samples_filtered]/[SumTotal_CPM_Original_Sample(1,000,000)]'] = Percentage_Total_CPM_2samples_filtered_in_Total .fillna(0).values
+Cutoff_results_df[f'Percentage(%)_[Total_Sequences_2samples_filtered(CPM>{Cutoff_CPM})]/[Total_TotalNum:{Total_Sequence_CPM_2samples_filtered}]'] = Percentage_Total_Sequence_above_cutoff_2samples_filtered_above_Cutoff.fillna(0).values
+Cutoff_results_df[f'Percentage(%)_[SumTotal_CPM_2samples_filtered(CPM>{Cutoff_CPM})]/[SumTotal_CPM_2samples_filtered]'] = Percentage_Total_CPM_above_cutoff_2samples_filtered_above_Cutoff .fillna(0).values
+Cutoff_results_df['Percentage(%)_[TotalNum_Sequences_2samples_filtered(CPM>0)]/[TotalNum_Sequences_1sample_filtered(CPM>0)]'] = Percentage_Total_CPM_2samples_filtered_in_CPM_1samples_filtered .fillna(0).values
+Cutoff_results_df['Percentage(%)_[SumTotal_CPM_2samples_filtered]/[SumTotal_CPM_1sample_filtered]'] = Percentage_of_CPMcontained_2samples_filtered .fillna(0).values
+#Using only one sample > Cutoff_CPM
+Cutoff_results_df[f'TotalNum_Sequences_Only1sample_filtered(CPM>0)(Total_TotalNum:{Total_Sequence_CPM_UN_filtered})'] = Sequence_CPM_UN_filtered_above0 .fillna(0).values
+Cutoff_results_df[f'TotalNum_Sequences_Only1sample_filtered(CPM>{Cutoff_CPM}),SUM=Total_TotalNum:{Total_Sequence_CPM_UN_filtered}'] = Sequence_CPM_UN_filtered_above_cutoff .fillna(0).values
+Cutoff_results_df['SumTotal_CPM_Only1sample_filtered'] = Sum_of_CPM_UN_filtered .fillna(0).values
+Cutoff_results_df[f'SumTotal_CPM_Only1sample_filtered(CPM>{Cutoff_CPM})'] = Sum_of_CPM_UN_filtered_above_cutoff .fillna(0).values
+Cutoff_results_df['AverageCPM_Only1sample_filtered'] = average_CPM_UN_filtered .fillna(0).values
+Cutoff_results_df['MaxCPM_Only1sample_filtered'] = max_CPM_UN_filtered .fillna(0).values
+Cutoff_results_df['MedianCPM_Only1sample_filtered'] = median_CPM_UN_filtered  .fillna(0).values
+Cutoff_results_df['MinCPM_Only1sample_filtered(CPM>0)'] = min_CPM_UN_filtered .fillna(0).values
+Cutoff_results_df['Percentage(%)_[Sequence_Only1sample_filtered(CPM>0)]/[TotalNum_Sequences_Original_Sample]'] = Percentage_Sequence_UN_filtered_above0_in_Total.fillna(0).values
+Cutoff_results_df['Percentage(%)_[SumTotal_CPM_Only1sample_filtered]/[SumTotal_CPM_Original_Sample:1,000,000]'] = Percentage_Total_CPM_UN_filtered_in_Total .fillna(0).values
+Cutoff_results_df['Percentage(%)_[TotalNum_Sequences_Only1samples_filtered(CPM>0)]/[TotalNum_Sequences_Original_Sample]'] = Percentage_Sequence_UN_filtered_above_cutoffin_in_Total.fillna(0).values
+Cutoff_results_df['Percentage(%)_[SumTotal_CPM_Only1samples_filtered]/[SumTotal_CPM_Original_Sample:1,000,000]'] = Percentage_Total_CPM_UN_filtered_above_cutoff_in_Total .fillna(0).values
+# Only one sample has a value > Cutoff_CPM; all others are 0.
+Cutoff_results_df[f'TotalNum_Sequences_Only1sample>{Cutoff_CPM}_TheOthers0(CPM>0)(Total_TotalNum:{Total_Sequence_CPM_Only1sample}) '] = Sequence_CPM_Seq_only_1sample .fillna(0).values
+Cutoff_results_df[f'SumTotal_CPM_Only1sample>{Cutoff_CPM}_TheOthers0'] = Sum_CPM_Seq_only_1sample .fillna(0).values
+Cutoff_results_df[f'AverageCPM_Only1sample>{Cutoff_CPM}_TheOthers0'] = average_CPM_Seq_only_1sample .fillna(0).values
+Cutoff_results_df[f'MaxCPM_Only1sample>{Cutoff_CPM}_TheOthers0'] = max_CPM_Seq_only_1sample .fillna(0).values
+Cutoff_results_df[f'MedianCPM_Only1sample>{Cutoff_CPM}_TheOthers0'] = median_CPM_Seq_only_1sample  .fillna(0).values
+Cutoff_results_df[f'MinCPM_Only1sample>{Cutoff_CPM}_TheOthers0(CPM>0)'] = min_CPM_Seq_only_1sample .fillna(0).values
+Cutoff_results_df[f'Percentage(%)_[Sequence_Only1sample>{Cutoff_CPM}_TheOthers0(CPM>0)]/[TotalNum_Sequences_Original_Sample]'] = Sequence_CPM_Seq_only_1sample*100 / total_sequences_in_each_sample.fillna(0).values
+Cutoff_results_df[f'Percentage(%)_[SumTotal_CPM_Only1sample>{Cutoff_CPM}_TheOthers0]/[SumTotal_CPM_Original_Sample:1,000,000]'] = Percentage_Total_CPM_Seq_only_1sample_in_Total .fillna(0).values
+Cutoff_results_df[f'Percentage(%)_[TotalNum_Sequences_Only1sample>{Cutoff_CPM}_TheOthers0(CPM>0)]/[TotalNum_Sequences_Only1sample_filtered(CPM>0)]'] = Percentage_Sequence_CPM_Seq_only_1sample_in_df_CPM_UN_filtered.fillna(0).values
+
+#In all samples > Cutoff_CPM
+Cutoff_results_df[f'SumTotal_CPM_AllSamples>{Cutoff_CPM}(TotalNum_Sequences:{Total_Sequence_CPM_exist_in_All_samples})'] = Sum_CPM_CPM_exist_in_All_samples .fillna(0).values
+Cutoff_results_df[f'AverageCPM_AllSamples>{Cutoff_CPM}'] = average_CPM_exist_in_All_samples .fillna(0).values
+Cutoff_results_df[f'MaxCPM_AllSamples>{Cutoff_CPM}'] = max_CPM_exist_in_All_samples .fillna(0).values
+Cutoff_results_df[f'MedianCPM_AllSamples>{Cutoff_CPM}'] = median_CPM_exist_in_All_samples .fillna(0).values
+Cutoff_results_df[f'MinCPM_AllSamples>{Cutoff_CPM}'] = min_CPM_exist_in_All_samples .fillna(0).values
+Cutoff_results_df[f'Percentage(%)_[Sequence_AllSamples>{Cutoff_CPM}]/[TotalNum_Sequences_Original_Sample]'] = Percentage_Sequence_CPM_exist_in_All_samples_in_Total.fillna(0).values
+Cutoff_results_df[f'Percentage(%)_[SumTotal_CPM_AllSamples>{Cutoff_CPM}]/[SumTotal_CPM_Original_Sample:1,000,000]'] = Percentage_Sequence_CPM_Seq_exist_in_All_samples_in_Total .fillna(0).values
+Cutoff_results_df[f'Percentage(%)_[TotalNum_Sequences_AllSamples>{Cutoff_CPM}]/[TotalNum_Sequences_2samples_filtered(CPM>{Cutoff_CPM})]_([TotalNum_Sequences_AllSamples>{Cutoff_CPM}]/[TotalNum_Sequences_2samples_filtered]:{Percentage_Sequence_CPM_Seq_exist_in_All_samples_in_df_CPM_filtered}%)'] = Percentage_Sequence_CPM_Seq_exist_in_All_samples_in_df_CPM_filtered_above_cuttoff .fillna(0).values
+Cutoff_results_df[f'Percentage(%)_[SumTotal_CPM_Only1sample>{Cutoff_CPM}]/[SumTotal_CPM_Original_Sample:1,000,000]'] = Percentage_CPM_CPM_exist_in_All_samples_in_df_CPM_filtered .fillna(0).values
+
+new_order = ['File_Names', 'Total_Reads', 'Total_Seqences', 'Mean_CPM', 'Max_CPM', 'Median_CPM', 'Min_CPM', 'Percentage(%)_SeqNum_is_less2(=1)', 'Percentage(%)_SeqNum_is_less3', 'Percentage(%)_SeqNum_is_less4', 'Percentage(%)_SeqNum_is_less5', 'Percentage(%)_SeqNum_is_less6', 'Percentage(%)_SeqNum_is_less11', 'Percentage(%)_SeqNum_is_less51', f'Percentage(%)_Sequence_in_Total_Total({Total_Total_Sequences})',
+             f'TotalNum_Sequences_1sample_filtered(CPM>0)(Total_TotalNum:{Total_Sequence_CPM_1samples_filtered})',
+             'SumTotal_CPM_1sample_filtered',
+             f'TotalNum_Sequences_1sample_filtered>{Cutoff_CPM}',
+             f'SumTotal_CPM_1sample_filtered>{Cutoff_CPM}',
+             'AverageCPM_1sample_filtered',
+             'MaxCPM_1sample_filtered',
+             'MedianCPM_1sample_filtered',
+             'MinCPM_1sample_filtered(CPM>0)',
+             f'Percentage(%)_[TotalNum_Sequences_1sample_filtered(CPM>{Cutoff_CPM})]/[Total_TotalNum:{Total_Sequence_CPM_1samples_filtered}]',
+             f'Percentage(%)_[SumTotal_CPM_1sample_filtered(CPM>{Cutoff_CPM}]/[SumTotal_CPMcontained_1sample_filtered]',
+             'Percentage(%)_[TotalNum_Sequences_1samples_filtered(CPM>0)]/[TotalNum_Sequences_Original_Sample]',
+             'Percentage(%)_[SumTotal_CPM_1samples_filtered]/[SumTotal_CPM_Original_Sample:1,000,000]',
+             f'TotalNum_Sequences_2samples_filtered(CPM>0)(Total_TotalNum:{Total_Sequence_CPM_2samples_filtered})',
+             'SumTotal_CPM_2samples_filtered',
+             f'TotalNum_Sequences_2samples_filtered(CPM>{Cutoff_CPM})',
+             f'SumTotal_CPM_2samples_filtered(CPM>{Cutoff_CPM})',
+             'AverageCPM_2samples_filtered',
+             'MaxCPM_2samples_filtered',
+             'MedianCPM_2samples_filtered',
+             'MinCPM_2samples_filtered(CPM>0)',
+             f'Percentage(%)_[TotalNum_Sequence_2samples_filtered(CPM>{Cutoff_CPM})]/[Total_TotalNum:{Total_Sequence_CPM_2samples_filtered}]',
+             f'Percentage(%)_[SumTotal_CPM_2samples_filtered>{Cutoff_CPM}]/[SumTotal_CPM_2samples_filtered:1,000,000]',
+             'Percentage(%)_[TotalNum_Sequences_2samples_filtered(CPM>0)]/[TotalNum_Sequences_Original_Sample]',
+             'Percentage(%)_[SumTotal_CPM_2samples_filtered]/[SumTotal_CPM_Original_Sample(1,000,000)]',
+             f'Percentage(%)_[Total_Sequences_2samples_filtered(CPM>{Cutoff_CPM})]/[Total_TotalNum:{Total_Sequence_CPM_2samples_filtered}]',
+             f'Percentage(%)_[SumTotal_CPM_2samples_filtered(CPM>{Cutoff_CPM})]/[SumTotal_CPM_2samples_filtered]',
+             'Percentage(%)_[TotalNum_Sequences_2samples_filtered(CPM>0)]/[TotalNum_Sequences_1sample_filtered(CPM>0)]',
+             'Percentage(%)_[SumTotal_CPM_2samples_filtered]/[SumTotal_CPM_1sample_filtered]',
+             f'TotalNum_Sequences_Only1sample_filtered(CPM>0)(Total_TotalNum:{Total_Sequence_CPM_UN_filtered})',
+             f'TotalNum_Sequences_Only1sample_filtered(CPM>{Cutoff_CPM}),SUM=Total_TotalNum:{Total_Sequence_CPM_UN_filtered}',
+             'SumTotal_CPM_Only1sample_filtered',
+             f'SumTotal_CPM_Only1sample_filtered(CPM>{Cutoff_CPM})',
+             'AverageCPM_Only1sample_filtered',
+             'MaxCPM_Only1sample_filtered',
+             'MedianCPM_Only1sample_filtered',
+             'MinCPM_Only1sample_filtered(CPM>0)',
+             'Percentage(%)_[Sequence_Only1sample_filtered(CPM>0)]/[TotalNum_Sequences_Original_Sample]',
+             'Percentage(%)_[SumTotal_CPM_Only1sample_filtered]/[SumTotal_CPM_Original_Sample:1,000,000]',
+             'Percentage(%)_[TotalNum_Sequences_Only1samples_filtered(CPM>0)]/[TotalNum_Sequences_Original_Sample]',
+             'Percentage(%)_[SumTotal_CPM_Only1samples_filtered]/[SumTotal_CPM_Original_Sample:1,000,000]',
+             f'TotalNum_Sequences_Only1sample>{Cutoff_CPM}_TheOthers0(CPM>0)(Total_TotalNum:{Total_Sequence_CPM_Only1sample}) ',
+             f'SumTotal_CPM_Only1sample>{Cutoff_CPM}_TheOthers0',
+             f'AverageCPM_Only1sample>{Cutoff_CPM}_TheOthers0',
+             f'MaxCPM_Only1sample>{Cutoff_CPM}_TheOthers0',
+             f'MedianCPM_Only1sample>{Cutoff_CPM}_TheOthers0',
+             f'MinCPM_Only1sample>{Cutoff_CPM}_TheOthers0(CPM>0)',
+             f'Percentage(%)_[Sequence_Only1sample>{Cutoff_CPM}_TheOthers0(CPM>0)]/[TotalNum_Sequences_Original_Sample]',
+             f'Percentage(%)_[SumTotal_CPM_Only1sample>{Cutoff_CPM}_TheOthers0]/[SumTotal_CPM_Original_Sample:1,000,000]',
+             f'Percentage(%)_[TotalNum_Sequences_Only1sample>{Cutoff_CPM}_TheOthers0(CPM>0)]/[TotalNum_Sequences_Only1sample_filtered(CPM>0)]',
+             f'Percentage(%)_[SumTotal_CPM_Only1sample>{Cutoff_CPM}_TheOthers0]/[SumTotal_CPM_Original_Sample:1,000,000]',
+             f'SumTotal_CPM_AllSamples>{Cutoff_CPM}(TotalNum_Sequences:{Total_Sequence_CPM_exist_in_All_samples})',
+             f'AverageCPM_AllSamples>{Cutoff_CPM}',
+             f'MaxCPM_AllSamples>{Cutoff_CPM}',
+             f'MedianCPM_AllSamples>{Cutoff_CPM}',
+             f'MinCPM_AllSamples>{Cutoff_CPM}',
+             f'Percentage(%)_[Sequence_AllSamples>{Cutoff_CPM}]/[TotalNum_Sequences_Original_Sample]',
+             f'Percentage(%)_[SumTotal_CPM_AllSamples>{Cutoff_CPM}]/[SumTotal_CPM_Original_Sample:1,000,000]',
+             f'Percentage(%)_[TotalNum_Sequences_AllSamples>{Cutoff_CPM}]/[TotalNum_Sequences_2samples_filtered(CPM>{Cutoff_CPM})]_([TotalNum_Sequences_AllSamples>{Cutoff_CPM}]/[TotalNum_Sequences_2samples_filtered]:{Percentage_Sequence_CPM_Seq_exist_in_All_samples_in_df_CPM_filtered}%)',
+             f'Percentage(%)_[SumTotal_CPM_Only1sample>{Cutoff_CPM}]/[SumTotal_CPM_Original_Sample:1,000,000]'
+            ] + cutoffs
+Cutoff_results_df = Cutoff_results_df[new_order]
+#Cutoff analysis up to this point
+
+#Starting from here: Quantile normalization of "df_counts_filtered"
+import qnorm
+Quantile_Normalized_df = qnorm.quantile_normalize(df_counts_filtered,axis=1,ncpus=8)
+
+# Define file names using the base name
+cutoff_results_filename = f'Cutoff&NumSeq-Analysis_{base_name}.csv'
+Num_of_Samples_cutoff_results_filename = f'Total_cutoff-SampleNumber_Analysis_{base_name}.csv'
+cutoff_CPM_for_Total_results_filename = f'Total_cutoff-CPMrelatesSeq&Reads_Analysis_{base_name}.csv'
+
+counts_filtered_filename = f'Counts_morethan{Cutoff_CPM}CPMin2samples_{base_name}.csv'
+
+rpm_filtered_filename = f'CPM_over{Cutoff_CPM}in2samples_{base_name}.csv'
+rpm_1sample_filename = f'CPM_1sample(morethan{Cutoff_CPM}CPM)_{base_name}.csv'
+rpm_filtered_Seq_only_1sample_filename = f'CPM-only1-sample(morethan0)_{base_name}.csv'
+
+fasta_filtered_filename = f'fasta_over{Cutoff_CPM}CPMin2samples_{base_name}.fa'
+fasta_CPM_Seq_exist_in_All_samples_MoreThanCuttOff_CPM_filename =  f'fasta_morethan{Cutoff_CPM}CPMinALL_samples_{base_name}.fa'
+fasta_rpm_only1_sample_filename = f'fasta_over{Cutoff_CPM}CPMinOnly1sample_{base_name}.fa'
+fasta_only_1sample_filename = f'fasta_over0.0CPMinOnly1sample_{base_name}.fa'
+
+Quantile_Normalized_Counts_filename = f'Q_Norm_Counts_over{Cutoff_CPM}CPMin2samples_{base_name}.csv'
+
+result_sheet_filename = f'ResultSheet_{base_name}.txt'
+#End of Quantile Normalization of "df_counts_filtered"
+
+# Saving files with the new base name
+Cutoff_results_df.to_csv(os.path.join(new_folder_path, cutoff_results_filename), index=False)
+Num_of_Samples_cutoff_results_df.to_csv(os.path.join(new_folder_path, Num_of_Samples_cutoff_results_filename), index=False)
+cutoff_CPM_for_Total_results_df.to_csv(os.path.join(new_folder_path, cutoff_CPM_for_Total_results_filename), index=False)
+
+df_counts_filtered.to_csv(os.path.join(new_folder_path, counts_filtered_filename))
+
+df_CPM_filtered.to_csv(os.path.join(new_folder_path, rpm_filtered_filename), index=False)
+df_CPM_UN_filtered.to_csv(os.path.join(new_folder_path, rpm_1sample_filename), index=False)
+df_CPM_Seq_only_1sample.to_csv(os.path.join(new_folder_path, rpm_filtered_Seq_only_1sample_filename), index=False)
+
+df_fasta_filtered.to_csv(os.path.join(new_folder_path, fasta_filtered_filename), sep='\n', index=False, header=None)
+fasta_CPM_exist_in_All_samples.to_csv(os.path.join(new_folder_path, fasta_CPM_Seq_exist_in_All_samples_MoreThanCuttOff_CPM_filename), sep='\n', index=False, header=None)
+fasta_CPM_UN_filtered.to_csv(os.path.join(new_folder_path, fasta_rpm_only1_sample_filename), sep='\n', index=False, header=None)
+df_fasta_only_1sample.to_csv(os.path.join(new_folder_path, fasta_only_1sample_filename), sep='\n', index=False, header=None)
+Quantile_Normalized_df.to_csv(os.path.join(new_folder_path, Quantile_Normalized_Counts_filename))
+
+#Creating the Results Sheet
+full_file_path = os.path.join(new_folder_path, result_sheet_filename)
+# Open the file in write mode ('w')
+with open(full_file_path, 'w') as file:
+    # Redirect the print output to the file
+    print("Result_Sheet", file=file)
+    print("=====Length==============================================", file=file)
+    print("Max_Length of All_Sequences", file=file)
+    print(All_Sequences['Seq'].str.len().max(), file=file)
+    print("min_Length of All_Sequences", file=file)
+    print(All_Sequences['Seq'].str.len().min(), file=file)
+    print("Medeian_Length of All_Sequences", file=file)
+    print(All_Sequences['Seq'].str.len().median(), file=file)
+    print("Average_Length of All_Sequences", file=file)
+    print(All_Sequences['Seq'].str.len().mean(), file=file)
+                                   
+    print(f"Max_Length of Sequences>{Cutoff_CPM}CPM in at least 2 samples(Filterd_for_TMM)", file=file)
+    print(df_fasta_filtered['Seq'].str.len().max(), file=file)
+    print(f"min_Length of Sequences>{Cutoff_CPM}CPM in at least 2 samples(Filterd_for_TMM)", file=file)
+    print(df_fasta_filtered['Seq'].str.len().min(), file=file)
+    print(f"Medeian_Length of Sequences>{Cutoff_CPM}CPM in at least 2 samples(Filterd_for_TMM)", file=file)
+    print(df_fasta_filtered['Seq'].str.len().median(), file=file)
+    print(f"Average_Length of Sequences>{Cutoff_CPM}CPM in at least 2 samples(Filterd_for_TMM)", file=file)
+    print(df_fasta_filtered['Seq'].str.len().mean(), file=file)
+    
+    print("=====Counts(Numbers)==============================================", file=file)
+    print("-----Counts of Sequences-----------------------------", file=file)
+    print("The number of All_Sequences", file=file)
+    print(df_All_Sequences.shape[0], file=file)
+    print(f'The number of Sequences>{Cutoff_CPM}CPM in at least 1 sample', file=file)
+    print(df_CPM.shape[0], file=file)
+    print(f'The number of Sequences>{Cutoff_CPM}CPM in at least 2 samples(Filterd_for_TMM)', file=file)
+    print(df_CPM_filtered.shape[0], file=file)
+    print('-----', file=file)
+    print(f'The number of Sequences>{Cutoff_CPM}CPM in All samples', file=file)
+    print(fasta_CPM_exist_in_All_samples.shape[0], file=file)
+    print('-----', file=file)
+    print(f'The number of Sequence>{Cutoff_CPM}CPM in only 1 sample', file=file)
+    print(df_CPM_UN_filtered.shape[0], file=file)
+    print(f'The number of Sequence>{Cutoff_CPM}CPM and Others are 0CPM', file=file)
+    print(df_CPM_Seq_only_1sample.shape[0], file=file)
+
+    print("-----Counts of Reads-----------------------", file=file)
+    print("The number of All_Reads-------------------------------", file=file)
+    print(Cutoff_results_df['Total_Reads'].sum(axis=0), file=file)
+    print(f'The number of Reads>{Cutoff_CPM}CPM in at least 1 sample', file=file)
+    print(df_counts.select_dtypes(include=[np.number]).sum().sum(), file=file)
+    print(f'The number of Reads>{Cutoff_CPM}CPM in at least 2 samples(Filterd_for_TMM)', file=file)
+    print(df_counts_filtered.select_dtypes(include=[np.number]).sum().sum(), file=file)
+    print('-----', file=file)
+    print(f'The number of Reads>{Cutoff_CPM}CPM in All samples', file=file)
+    print(df_counts_exist_in_All_samples.select_dtypes(include=[np.number]).sum().sum(), file=file)
+    print('-----', file=file)
+    print(f'The number of Reads>{Cutoff_CPM}CPM in only 1 sample', file=file)
+    print(df_counts_UN_filtered.select_dtypes(include=[np.number]).sum().sum(), file=file)
+    print(f'The number of Reads>{Cutoff_CPM}CPM and TheOthers are 0CPM', file=file)
+    print(df_counts_only_1sample.select_dtypes(include=[np.number]).sum().sum(), file=file)
+    
+    print("-----Average & Median of averageCPM----------------------------------", file=file)
+    print("The Average of averageCPM of All_Sequences", file=file)
+    print(df_AllSamples_averageCPM.mean(), file=file)
+    print("The Median of averageCPM of All_Sequences", file=file)
+    print(df_AllSamples_averageCPM.median(), file=file)
+    print('-----', file=file)
+    print(f"The Average of averageCPM of Sequences>{Cutoff_CPM}CPM in at least 1 sample", file=file)
+    print(df_CPM_averageCPM.mean(), file=file)
+    print(f"The Median of averageCPM of Sequences>{Cutoff_CPM}CPM in at least 1 sample", file=file)
+    print(df_CPM_averageCPM.median(), file=file)
+    print('-----', file=file)
+    print(f"The Average of averageCPM of Sequences>{Cutoff_CPM}CPM in at least 2 sample", file=file)
+    print(df_CPM_filtered_averageCPM.mean(), file=file)
+    print(f"The Median of averageCPM of Sequences>{Cutoff_CPM}CPM in at least 2 sample", file=file)
+    print(df_CPM_filtered_averageCPM.median(), file=file)
+    print('-----', file=file)
+    print(f"The Average of averageCPM of Sequences>{Cutoff_CPM}CPM in All sample", file=file)
+    print(df_CPM_exist_in_All_samples_averageCPM.mean(), file=file)
+    print(f"The Median of averageCPM of Sequences>{Cutoff_CPM}CPM in All sample", file=file)
+    print(df_CPM_exist_in_All_samples_averageCPM.median(), file=file)
+
+
+    print("=====Percentages(%)=================================================", file=file)
+    print("-----Percentages(%) of Sequences-----------------------", file=file)
+    print(f'The percentages(%) of [Count_of_Sequence>{Cutoff_CPM}CPM in at least 1sample] in [Count_of_All_Sequences]', file=file)
+    print((df_CPM.shape[0] * 100) / df_All_Sequences.shape[0], file=file)
+    print(f'The percentages(%) of [Count_of_Sequence>{Cutoff_CPM}CPM in at least 2sample(Filterd_for_TMM)] in [Count_of_Sequences>{Cutoff_CPM}CPM in at least 1sample]', file=file)
+    print((df_CPM_filtered.shape[0] * 100) / df_CPM.shape[0], file=file)
+    print(f'The percentages(%) of [Count_of_Sequence>{Cutoff_CPM}CPM in at least 2sample(Filterd_for_TMM)] in [Count_of_All_Sequences]', file=file)
+    print((df_CPM_filtered.shape[0] * 100) / df_All_Sequences.shape[0], file=file)
+    print('-----', file=file)
+    print(f'The percentages(%) of [Count_of_Sequence>{Cutoff_CPM}CPM in All samples] in [Count_of_Sequences>{Cutoff_CPM}CPM in at least 2sample]', file=file)
+    print((fasta_CPM_exist_in_All_samples.shape[0] * 100) / df_CPM_filtered.shape[0], file=file)
+    print(f'The percentages(%) of [Count_of_Sequence>{Cutoff_CPM}CPM in All samples] in [Count_of_All_Sequences]', file=file)
+    print((fasta_CPM_exist_in_All_samples.shape[0] * 100) / df_All_Sequences.shape[0], file=file)
+    print('-----', file=file)
+    print(f'The percentages(%) of [Count_of_Sequence>{Cutoff_CPM}CPM in only 1 sample] in [Count_of_Sequences>{Cutoff_CPM}CPM in at least 1sample]', file=file)
+    print((df_CPM_UN_filtered.shape[0] * 100) / df_CPM.shape[0], file=file)
+    print(f'The percentages(%) of [Count_of_Sequence>{Cutoff_CPM}CPM and Others are 0CPM] in [Count_of_Sequences>{Cutoff_CPM}CPM in at least 1sample]', file=file)
+    print((df_CPM_Seq_only_1sample.shape[0] * 100) / df_CPM.shape[0], file=file)
+    
+    print("-----Percentages(%) of Reads----------------------------", file=file)
+    print(f'The percentages(%) of [Count_of_Reads>{Cutoff_CPM}CPM in at least 1sample] / [Count_of_All_Reads]', file=file)
+    print(df_counts.select_dtypes(include=[np.number]).sum().sum()*100/Cutoff_results_df['Total_Reads'].sum(axis=0), file=file)
+    print(f'The percentages(%) of [Count_of_Reads>{Cutoff_CPM}CPM in at least 2sample(Filterd_for_TMM)] / [Count_of_Reads>{Cutoff_CPM}CPM in at least 1sample]', file=file)
+    print((df_counts_filtered.select_dtypes(include=[np.number]).sum().sum()*100)/(df_counts.select_dtypes(include=[np.number]).sum().sum()), file=file)
+    print(f'The percentages(%) of [Count_of_Reads>{Cutoff_CPM}CPM in at least 2sample(Filterd_for_TMM)] / [Count_of_All_Reads]', file=file)
+    print((df_counts_filtered.select_dtypes(include=[np.number]).sum().sum()*100)/Cutoff_results_df['Total_Reads'].sum(axis=0), file=file)
+    print('-----', file=file)
+    print(f'The percentages(%) of [Count_of_Reads>{Cutoff_CPM}CPM in All samples] / [Count_of_Reads>{Cutoff_CPM}CPM in at least 2sample]', file=file)
+    print(df_counts_exist_in_All_samples.select_dtypes(include=[np.number]).sum().sum()*100/df_counts_filtered.select_dtypes(include=[np.number]).sum().sum(), file=file)
+    print(f'The percentages(%) of [Count_of_Reads>{Cutoff_CPM}CPM in All samples] / [Count_of_All_Reads]', file=file)
+    print(df_counts_exist_in_All_samples.select_dtypes(include=[np.number]).sum().sum()*100/Cutoff_results_df['Total_Reads'].sum(axis=0), file=file)
+    print('-----', file=file)
+    print(f'The percentages(%) of [Count_of_Reads>{Cutoff_CPM}CPM in only 1 sample] / [Count_of_Reads>{Cutoff_CPM}CPM in at least 1sample]', file=file)
+    print(df_counts_UN_filtered.select_dtypes(include=[np.number]).sum().sum()*100/df_counts.select_dtypes(include=[np.number]).sum().sum(), file=file)
+    print(f'The percentages(%) of [Count_of_Reads>{Cutoff_CPM}CPM and Others are 0CPM] / [Count_of_Reads>{Cutoff_CPM}CPM in at least 1sample]', file=file)
+    print(df_counts_only_1sample.select_dtypes(include=[np.number]).sum().sum()*100/(df_counts.select_dtypes(include=[np.number]).sum().sum() - df_counts_filtered.select_dtypes(include=[np.number]).sum().sum()), file=file)
+    print(f'The percentages(%) of [Count_of_Reads>{Cutoff_CPM}CPM and Others are 0CPM] / [Count_of_All_Reads]', file=file)
+    print(df_counts_only_1sample.select_dtypes(include=[np.number]).sum().sum()*100/Cutoff_results_df['Total_Reads'].sum(axis=0), file=file)
+    
+    print(f"-----Percentages(%) of Count of Sequence averageCPM>{Cutoff_CPM}--------", file=file)
+    print(f"The percentages(%) of [Count of Sequence_with_averageCPM>{Cutoff_CPM}] / [Total_count of Sequence]in All Sequence", file=file)
+    print((df_AllSamples_averageCPM>Cutoff_CPM).sum(axis=0)*100/df_AllSamples_averageCPM.shape[0], file=file)
+    print("-----", file=file)
+    print(f"The percentages(%) of [Count of Sequence_with_averageCPM>{Cutoff_CPM}] / [Total_count of Sequence]in Sequence>{Cutoff_CPM}CPM at least 1sample", file=file)
+    print((df_CPM_averageCPM>Cutoff_CPM).sum(axis=0)*100/df_CPM_averageCPM.shape[0], file=file)
+    print("-----", file=file)
+    print(f"The percentages(%) of [Count of Sequence_with_averageCPM>{Cutoff_CPM}] / [Total_count of Sequence]in Sequence>{Cutoff_CPM}CPM at least 2sample", file=file)
+    print((df_CPM_filtered_averageCPM>Cutoff_CPM).sum(axis=0)*100/df_CPM_filtered_averageCPM.shape[0], file=file)
+    print("-----", file=file)
+    print(f"The percentages(%) of [Count of Sequence_with_averageCPM>{Cutoff_CPM}] / [Total_count of Sequence]in Sequence>{Cutoff_CPM}CPM at All sample", file=file)
+    print((df_CPM_exist_in_All_samples_averageCPM>Cutoff_CPM).sum(axis=0)*100/df_CPM_exist_in_All_samples_averageCPM.shape[0], file=file)
+
+
+#Output of "Result_Sheet"
+print("Result_Sheet")
+print("=====Length==============================================")
+print("Max_Length of All_Sequences")
+print(All_Sequences['Seq'].str.len().max())
+print("min_Length of All_Sequences")
+print(All_Sequences['Seq'].str.len().min())
+print("Medeian_Length of All_Sequences")
+print(All_Sequences['Seq'].str.len().median())
+print("Average_Length of All_Sequences")
+print(All_Sequences['Seq'].str.len().mean())
+                                   
+print(f"Max_Length of Sequences>{Cutoff_CPM}CPM in at least 2 samples(Filterd_for_TMM)")
+print(df_fasta_filtered['Seq'].str.len().max())
+print(f"min_Length of Sequences>{Cutoff_CPM}CPM in at least 2 samples(Filterd_for_TMM)")
+print(df_fasta_filtered['Seq'].str.len().min())
+print(f"Medeian_Length of Sequences>{Cutoff_CPM}CPM in at least 2 samples(Filterd_for_TMM)")
+print(df_fasta_filtered['Seq'].str.len().median())
+print(f"Average_Length of Sequences>{Cutoff_CPM}CPM in at least 2 samples(Filterd_for_TMM)")
+print(df_fasta_filtered['Seq'].str.len().mean())
+print("=====Counts(Numbers)==============================================")
+print("-----Counts of Sequences-----------------------------")
+print("The number of All_Sequences")
+print(df_All_Sequences.shape[0])
+print(f'The number of Sequences>{Cutoff_CPM}CPM in at least 1 sample')
+print(df_CPM.shape[0])
+print(f'The number of Sequences>{Cutoff_CPM}CPM in at least 2 samples(Filterd_for_TMM)')
+print(df_CPM_filtered.shape[0])
+print('-----')
+print(f'The number of Sequences>{Cutoff_CPM}CPM in All samples')
+print(fasta_CPM_exist_in_All_samples.shape[0])
+print('-----')
+print(f'The number of Sequence>{Cutoff_CPM}CPM in only 1 sample')
+print(df_CPM_UN_filtered.shape[0])
+print(f'The number of Sequence>{Cutoff_CPM}CPM and TheOthers are 0CPM')
+print(df_CPM_Seq_only_1sample.shape[0])
+
+print("-----Counts of Reads----------------------------------")
+print("The number of All_Reads")
+print(Cutoff_results_df['Total_Reads'].sum(axis=0))
+print(f'The number of Reads>{Cutoff_CPM}CPM in at least 1 sample')
+print(df_counts.select_dtypes(include=[np.number]).sum().sum())
+print(f'The number of Reads>{Cutoff_CPM}CPM in at least 2 samples(Filterd_for_TMM)')
+print(df_counts_filtered.select_dtypes(include=[np.number]).sum().sum())
+print('-----')
+print(f'The number of Reads>{Cutoff_CPM}CPM in All samples')
+print(df_counts_exist_in_All_samples.select_dtypes(include=[np.number]).sum().sum())
+print('-----')
+print(f'The number of Reads>{Cutoff_CPM}CPM in only 1 sample')
+print(df_counts_UN_filtered.select_dtypes(include=[np.number]).sum().sum())
+print(f'The number of Reads>{Cutoff_CPM}CPM and TheOthers are 0CPM')
+print(df_counts_only_1sample.select_dtypes(include=[np.number]).sum().sum())
+
+print("-----Average & Median of averageCPM----------------------------------")
+print("The Average of averageCPM of All_Sequences")
+print(df_AllSamples_averageCPM.mean())
+print("The Median of averageCPM of All_Sequences")
+print(df_AllSamples_averageCPM.median())
+print('-----')
+print(f"The Average of averageCPM of Sequences>{Cutoff_CPM}CPM in at least 1 sample")
+print(df_CPM_averageCPM.mean())
+print(f"The Median of averageCPM of Sequences>{Cutoff_CPM}CPM in at least 1 sample")
+print(df_CPM_averageCPM.median())
+print('-----')
+print(f"The Average of averageCPM of Sequences>{Cutoff_CPM}CPM in at least 2 sample")
+print(df_CPM_filtered_averageCPM.mean())
+print(f"The Median of averageCPM of Sequences>{Cutoff_CPM}CPM in at least 2 sample")
+print(df_CPM_filtered_averageCPM.median())
+print('-----')
+print(f"The Average of averageCPM of Sequences>{Cutoff_CPM}CPM in All sample")
+print(df_CPM_exist_in_All_samples_averageCPM.mean())
+print(f"The Median of averageCPM of Sequences>{Cutoff_CPM}CPM in All sample")
+print(df_CPM_exist_in_All_samples_averageCPM.median())
+
+print("=====Percentages(%)=================================================")
+print("-----Percentages(%) of Sequences-----------------------")
+print(f'The percentages(%) of [Count_of_Sequence>{Cutoff_CPM}CPM in at least 1sample] / [Count_of_All_Sequences]')
+print((df_CPM.shape[0] * 100) / df_All_Sequences.shape[0])
+print(f'The percentages(%) of [Count_of_Sequence>{Cutoff_CPM}CPM in at least 2sample(Filterd_for_TMM)] / [Count_of_Sequences>{Cutoff_CPM}CPM in at least 1sample]')
+print((df_CPM_filtered.shape[0] * 100) / df_CPM.shape[0])
+print(f'The percentages(%) of [Count_of_Sequence>{Cutoff_CPM}CPM in at least 2sample(Filterd_for_TMM)] / [Count_of_All_Sequences]')
+print((df_CPM_filtered.shape[0] * 100) / df_All_Sequences.shape[0])
+print('-----')
+print(f'The percentages(%) of [Count_of_Sequence>{Cutoff_CPM}CPM in All samples] / [Count_of_Sequences>{Cutoff_CPM}CPM in at least 2sample]')
+print((fasta_CPM_exist_in_All_samples.shape[0] * 100) / df_CPM_filtered.shape[0])
+print(f'The percentages(%) of [Count_of_Sequence>{Cutoff_CPM}CPM in All samples] / [Count_of_All_Sequences]')
+print((fasta_CPM_exist_in_All_samples.shape[0] * 100) / df_All_Sequences.shape[0])
+print('-----')
+print(f'The percentages(%) of [Count_of_Sequence>{Cutoff_CPM}CPM in only 1 sample] / [Count_of_Sequences>{Cutoff_CPM}CPM in at least 1sample]')
+print((df_CPM_UN_filtered.shape[0] * 100) / df_CPM.shape[0])
+print(f'The percentages(%) of [Count_of_Sequence>{Cutoff_CPM}CPM and Others are 0CPM] / [Count_of_Sequence>{Cutoff_CPM}CPM in only 1 sample]')
+print((df_CPM_Seq_only_1sample.shape[0] * 100) / (df_CPM_UN_filtered.shape[0] * 100))
+
+print("-----Percentages(%) of Reads----------------------------")
+print(f'The percentages(%) of [Count_of_Reads>{Cutoff_CPM}CPM in at least 1sample] / [Count_of_All_Reads]')
+print(df_counts.select_dtypes(include=[np.number]).sum().sum()*100/Cutoff_results_df['Total_Reads'].sum(axis=0))
+print(f'The percentages(%) of [Count_of_Reads>{Cutoff_CPM}CPM in at least 2sample(Filterd_for_TMM)] / [Count_of_Reads>{Cutoff_CPM}CPM in at least 1sample]')
+print((df_counts_filtered.select_dtypes(include=[np.number]).sum().sum()*100)/(df_counts.select_dtypes(include=[np.number]).sum().sum()))
+print(f'The percentages(%) of [Count_of_Reads>{Cutoff_CPM}CPM in at least 2sample(Filterd_for_TMM)] / [Count_of_All_Reads]')
+print((df_counts_filtered.select_dtypes(include=[np.number]).sum().sum()*100)/Cutoff_results_df['Total_Reads'].sum(axis=0))
+print('-----')
+print(f'The percentages(%) of [Count_of_Reads>{Cutoff_CPM}CPM in All samples] / [Count_of_Reads>{Cutoff_CPM}CPM in at least 2sample]')
+print(df_counts_exist_in_All_samples.select_dtypes(include=[np.number]).sum().sum()*100/df_counts_filtered.select_dtypes(include=[np.number]).sum().sum())
+print(f'The percentages(%) of [Count_of_Reads>{Cutoff_CPM}CPM in All samples] / [Count_of_All_Reads]')
+print(df_counts_exist_in_All_samples.select_dtypes(include=[np.number]).sum().sum()*100/Cutoff_results_df['Total_Reads'].sum(axis=0))
+print('-----')
+print(f'The percentages(%) of [Count_of_Reads>{Cutoff_CPM}CPM in only 1 sample] / [Count_of_Reads>{Cutoff_CPM}CPM in at least 1sample]')
+print(df_counts_UN_filtered.select_dtypes(include=[np.number]).sum().sum()*100/df_counts.select_dtypes(include=[np.number]).sum().sum())
+print(f'The percentages(%) of [Count_of_Reads>{Cutoff_CPM}CPM and Others are 0CPM] / [Count_of_Reads>{Cutoff_CPM}CPM in at least 1sample]')
+print(df_counts_only_1sample.select_dtypes(include=[np.number]).sum().sum()*100/(df_counts.select_dtypes(include=[np.number]).sum().sum() - df_counts_filtered.select_dtypes(include=[np.number]).sum().sum()))
+print(f'The percentages(%) of [Count_of_Reads>{Cutoff_CPM}CPM and Others are 0CPM] / [Count_of_All_Reads]')
+print(df_counts_only_1sample.select_dtypes(include=[np.number]).sum().sum()*100/Cutoff_results_df['Total_Reads'].sum(axis=0))
+
+print(f"-----Percentages(%) of Count of Sequence averageCPM>{Cutoff_CPM}--------")
+print(f"The percentages(%) of [Count of Sequence_with_averageCPM>{Cutoff_CPM}] / [Total_count of Sequence]in All Sequence")
+print((df_AllSamples_averageCPM>Cutoff_CPM).sum(axis=0)*100/df_AllSamples_averageCPM.shape[0])
+print("-----")
+print(f"The percentages(%) of [Count of Sequence_with_averageCPM>{Cutoff_CPM}] / [Total_count of Sequence]in Sequence>{Cutoff_CPM}CPM at least 1sample")
+print((df_CPM_averageCPM>Cutoff_CPM).sum(axis=0)*100/df_CPM_averageCPM.shape[0])
+print("-----")
+print(f"The percentages(%) of [Count of Sequence_with_averageCPM>{Cutoff_CPM}] / [Total_count of Sequence]in Sequence>{Cutoff_CPM}CPM at least 2sample")
+print((df_CPM_filtered_averageCPM>Cutoff_CPM).sum(axis=0)*100/df_CPM_filtered_averageCPM.shape[0])
+print("-----")
+print(f"The percentages(%) of [Count of Sequence_with_averageCPM>{Cutoff_CPM}] / [Total_count of Sequence]in Sequence>{Cutoff_CPM}CPM at All sample")
+print((df_CPM_exist_in_All_samples_averageCPM>Cutoff_CPM).sum(axis=0)*100/df_CPM_exist_in_All_samples_averageCPM.shape[0])
