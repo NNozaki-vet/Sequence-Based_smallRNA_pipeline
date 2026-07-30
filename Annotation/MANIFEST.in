@@ -1,0 +1,7 @@
+include annotation_align_core.pyx
+include annotation_align_core.c
+include annotate_sequences.py
+include references_example.csv
+include BUILD.md
+include requirements-build.txt
+include requirements-build-c.txt

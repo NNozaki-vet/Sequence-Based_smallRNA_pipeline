@@ -1,0 +1,11 @@
+﻿query_sequence,reference_entry_name,total_mismatch_and_extension_count,mismatch_count,query_5prime_extension_length,query_5prime_extension_sequence,reference_5prime_unmatched_length,reference_mismatch_position1_1based,reference_to_query_mismatch1,reference_mismatch_position2_1based,reference_to_query_mismatch2,reference_mismatch_position3_1based,reference_to_query_mismatch3,query_3prime_extension_length,query_3prime_extension_sequence,reference_3prime_unmatched_length
+AAAAGCTGGGTTGAGAGGGCGAAAG,reference_C_4,0,0,0,,0,,,,,,,0,,0
+AAGTGCCCCCACAGTTTGAGTG,reference_C_1,2,1,1,A,0,15,C>T,,,,,0,,0
+AAGTGCCCCCACAGTTTGAGTG,reference_C_1_add_1nt,2,1,1,A,0,15,C>T,,,,,0,,1
+AAGTGCCCCCACAGTTTGAGTG,reference_C_1_add_2nt,2,1,1,A,0,15,C>T,,,,,0,,2
+AAGTGCCCCCACAGTTTGAGTG,reference_C_1_add_10nt,2,1,1,A,0,15,C>T,,,,,0,,10
+ATCTAGGGTGATCATACGACCGGATCAT,reference_C_6,3,0,3,ATC,0,,,,,,,0,,0
+CGGGAAACCTCACCCGGCCCGGAC,Unannotated,10,0,0,,0,,,,,,,0,,0
+TCCGCGCCTGGAGTCCGCCTGAA,Unannotated,10,0,0,,0,,,,,,,0,,0
+TCTGCAGACCCGGCCTTGGCAT,reference_C_2,1,1,0,,1,15,T>C,,,,,0,,0
+TCTGCAGACCCGGCCTTGGCAT,reference_C_2_add_1nt,1,1,0,,1,15,T>C,,,,,0,,1

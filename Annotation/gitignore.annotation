@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Build outputs
+build/
+dist/
+*.obj
+*.exp
+*.lib
+*.so
+
+# Compiled Windows extensions are distributed only as release assets
+*.pyd
+!CPython_3.13_Windows_64-bit/annotation_align_core.cp313-win_amd64.pyd
+
+# Runtime outputs
+reference_cache/
+*_tmp_*/
