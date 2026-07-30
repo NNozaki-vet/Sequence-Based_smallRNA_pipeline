@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "Sequence-Based Small RNA Pipeline"
+version: "2.0.0"
+type: software
+license: "Apache-2.0"
+
+abstract: >-
+  A sequence-centered workflow for filtering and annotating
+  small RNA-seq reads while preserving exact nucleotide sequences.
+
+authors:
+  - family-names: "Nozaki"
+    given-names: "Nobuhiro"
+    affiliation: "Kagoshima University"
+    orcid: "https://orcid.org/0009-0005-7261-3193"
+
+keywords:
+  - small RNA sequencing
+  - miRNA
+  - isomiR
+  - sequence-based analysis
+  - bioinformatics
+  - Cython
