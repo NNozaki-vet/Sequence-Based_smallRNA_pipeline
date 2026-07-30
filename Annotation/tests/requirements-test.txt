@@ -1,0 +1,2 @@
+# No third-party test dependencies are required.
+# test_annotation.py uses only the Python standard library.
